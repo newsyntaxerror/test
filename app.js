@@ -511,7 +511,7 @@
     'groupMsg', 'groupSubmit', 'groupCancel',
     'btnSheetHide', 'btnAddFriend2', 'reqBox', 'reqCount', 'reqList',
     'fabLocate', 'sheetOpen', 'sheetOpenBadge',
-    'mapStyle', 'btnMapStyle', 'mapStyleMenu', 'mapStyleDot',
+    'mapStyle', 'btnMapStyle', 'mapStyleMenu', 'mapStyleDot', 'mapStyleNote',
     'panelFriends', 'panelChat', 'memberList', 'btnUpdate', 'updateSub', 'btnAuto', 'btnCopy',
     'convoList', 'toast',
     'memberModal', 'mCard', 'mAvatar', 'mName', 'mStatus', 'mRows', 'mEdit', 'mNickInput',
@@ -1987,6 +1987,7 @@
       el.btnMapStyle.setAttribute('title', '지도 스타일: ' + s.name);
     }
     if (el.mapStyleDot) el.mapStyleDot.setAttribute('data-style', next);
+    if (el.mapStyleNote) el.mapStyleNote.hidden = !!CARTO_KEY;
     if (el.mapStyleMenu) {
       el.mapStyleMenu.querySelectorAll('[data-map-style]').forEach((btn) => {
         const on = btn.getAttribute('data-map-style') === next;

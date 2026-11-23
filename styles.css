@@ -973,6 +973,15 @@ svg { display: block; }
 .map-opt-text em { display: block; font-style: normal; font-size: 9.5px; font-weight: 600; color: var(--muted-2); line-height: 1.25; }
 .map-opt-check { margin-left: auto; font-size: 12px; font-weight: 900; color: var(--accent-deep); opacity: 0; }
 .map-opt.is-on .map-opt-check { opacity: 1; }
+.map-style-note {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted-2);
+  text-align: center;
+  padding: 5px 4px 3px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
 .app.is-route .map-style { display: none; }
 
 /* 다크 지도: 핀 라벨·저작권 표시가 묻히지 않게 */
