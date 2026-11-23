@@ -1,0 +1,42 @@
+{
+  "name": "우리끼리 — 친구끼리만 위치·채팅",
+  "short_name": "우리끼리",
+  "description": "광고 없이, 서로 친구가 된 사람끼리만 위치와 채팅을 나누는 웹앱",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#0fb9a3",
+  "categories": [
+    "social",
+    "navigation",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
