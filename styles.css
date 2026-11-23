@@ -359,6 +359,10 @@ svg { display: block; }
 }
 .map { position: absolute; inset: 0; background: #e8eef4; z-index: 0; }
 .map .leaflet-tile-pane { filter: saturate(.92) contrast(1.02); }
+/* 벡터 지도 캔버스는 필터 없이 원본 그대로 — 확대해도 흐려지지 않게 */
+.map .leaflet-gl-layer,
+.map .leaflet-gl-layer canvas { filter: none !important; background: transparent; }
+.map .leaflet-gl-layer canvas { image-rendering: auto; }
 
 /* 저작권 표시: 시트에 가리지 않게 위로 올림 */
 .leaflet-bottom.leaflet-left { bottom: calc(var(--sheet-h) + 6px); transition: bottom .22s ease; }
@@ -915,10 +919,10 @@ svg { display: block; }
   border: 2px solid #fff;
   box-shadow: 0 1px 3px rgba(15, 23, 42, .3);
 }
-.map-btn-dot[data-style="voyager"] { background: linear-gradient(135deg, #eef3e4, #dfeaf4 55%, #f6eee2); }
 .map-btn-dot[data-style="positron"] { background: linear-gradient(135deg, #f8f9fa, #e6ebf0); }
+.map-btn-dot[data-style="liberty"] { background: linear-gradient(135deg, #eef3e4, #dfeaf4 55%, #f6eee2); }
+.map-btn-dot[data-style="bright"] { background: linear-gradient(135deg, #fef8e8, #dcefe0 55%, #dbe9f6); }
 .map-btn-dot[data-style="dark"] { background: linear-gradient(135deg, #22303f, #0d1520); }
-.map-btn-dot[data-style="osm"] { background: linear-gradient(135deg, #f3efe6, #e3dfd3); }
 
 .map-style-menu {
   position: absolute;
@@ -965,10 +969,10 @@ svg { display: block; }
   border-radius: 8px;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .09);
 }
-.map-opt-swatch--voyager { background: linear-gradient(135deg, #eef3e4, #dfeaf4 55%, #f6eee2); }
 .map-opt-swatch--positron { background: linear-gradient(135deg, #f8f9fa, #e6ebf0); }
+.map-opt-swatch--liberty { background: linear-gradient(135deg, #eef3e4, #dfeaf4 55%, #f6eee2); }
+.map-opt-swatch--bright { background: linear-gradient(135deg, #fef8e8, #dcefe0 55%, #dbe9f6); }
 .map-opt-swatch--dark { background: linear-gradient(135deg, #22303f, #0d1520); }
-.map-opt-swatch--osm { background: linear-gradient(135deg, #f3efe6, #e3dfd3); }
 .map-opt-text b { display: block; font-size: 12.5px; font-weight: 800; color: var(--ink); line-height: 1.25; }
 .map-opt-text em { display: block; font-style: normal; font-size: 9.5px; font-weight: 600; color: var(--muted-2); line-height: 1.25; }
 .map-opt-check { margin-left: auto; font-size: 12px; font-weight: 900; color: var(--accent-deep); opacity: 0; }

@@ -24,7 +24,9 @@
 <link rel="icon" href="./icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="./styles.css?v=22">
+<link rel="stylesheet" href="./vendor/maplibre/maplibre-gl.css">
+<link rel="stylesheet" href="./styles.css?v=23">
+<link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
 <script>
   /* 화면 확인용: 콘솔 에러를 남겨 두면 개발자도구 없이도 읽을 수 있습니다. */
   window.__ERRORS__ = [];
@@ -120,7 +122,7 @@
     </p>
 
     <p class="install-note">아이폰은 사파리 <b>공유 → 홈 화면에 추가</b>로 앱처럼 쓸 수 있어요.</p>
-    <p class="app-ver app-ver--join">우리끼리 <b id="appVerJoin">v22</b></p>
+    <p class="app-ver app-ver--join">우리끼리 <b id="appVerJoin">v23</b></p>
   </div>
 </div>
 
@@ -231,9 +233,9 @@
   <div class="map-style" id="mapStyle">
     <div class="map-style-menu" id="mapStyleMenu" role="menu" aria-label="지도 스타일 고르기" hidden>
       <p class="map-style-title">지도 스타일</p>
-      <button class="map-opt is-on" type="button" role="menuitemradio" aria-checked="true" data-map-style="voyager">
-        <span class="map-opt-swatch map-opt-swatch--voyager" aria-hidden="true"></span>
-        <span class="map-opt-text"><b>파스텔</b><em>Voyager</em></span>
+      <button class="map-opt is-on" type="button" role="menuitemradio" aria-checked="true" data-map-style="liberty">
+        <span class="map-opt-swatch map-opt-swatch--liberty" aria-hidden="true"></span>
+        <span class="map-opt-text"><b>파스텔</b><em>Liberty</em></span>
         <span class="map-opt-check" aria-hidden="true">✓</span>
       </button>
       <button class="map-opt" type="button" role="menuitemradio" aria-checked="false" data-map-style="positron">
@@ -241,21 +243,21 @@
         <span class="map-opt-text"><b>미니멀</b><em>Positron</em></span>
         <span class="map-opt-check" aria-hidden="true">✓</span>
       </button>
+      <button class="map-opt" type="button" role="menuitemradio" aria-checked="false" data-map-style="bright">
+        <span class="map-opt-swatch map-opt-swatch--bright" aria-hidden="true"></span>
+        <span class="map-opt-text"><b>밝게</b><em>Bright</em></span>
+        <span class="map-opt-check" aria-hidden="true">✓</span>
+      </button>
       <button class="map-opt" type="button" role="menuitemradio" aria-checked="false" data-map-style="dark">
         <span class="map-opt-swatch map-opt-swatch--dark" aria-hidden="true"></span>
-        <span class="map-opt-text"><b>다크</b><em>Dark Matter</em></span>
+        <span class="map-opt-text"><b>다크</b><em>Dark</em></span>
         <span class="map-opt-check" aria-hidden="true">✓</span>
       </button>
-      <button class="map-opt" type="button" role="menuitemradio" aria-checked="false" data-map-style="osm">
-        <span class="map-opt-swatch map-opt-swatch--osm" aria-hidden="true"></span>
-        <span class="map-opt-text"><b>기본</b><em>OpenStreetMap</em></span>
-        <span class="map-opt-check" aria-hidden="true">✓</span>
-      </button>
-      <p class="map-style-note" id="mapStyleNote" hidden>CARTO 키 없이 미리보기 · OSM 톤</p>
+      <p class="map-style-note" id="mapStyleNote" hidden>벡터 지도를 못 불러와 OSM으로 대신 보여줘요</p>
     </div>
     <button class="map-btn" id="btnMapStyle" type="button" aria-label="지도 스타일 바꾸기" aria-haspopup="menu" aria-expanded="false" title="지도 스타일">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4 20 7.6l-8 4.2-8-4.2 8-4.2Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m4 12 8 4.2 8-4.2M4 16.4l8 4.2 8-4.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span class="map-btn-dot" id="mapStyleDot" data-style="voyager" aria-hidden="true"></span>
+      <span class="map-btn-dot" id="mapStyleDot" data-style="liberty" aria-hidden="true"></span>
     </button>
   </div>
 
@@ -345,7 +347,7 @@
           <button class="btn btn--ghost" id="mNotifAsk" type="button">알림 켜기</button>
         </div>
 
-        <p class="app-ver">우리끼리 <b id="appVer">v22</b> · 수정할 때마다 버전이 올라가요</p>
+        <p class="app-ver">우리끼리 <b id="appVer">v23</b> · 수정할 때마다 버전이 올라가요</p>
 
         <div class="batt-edit" id="mBatt" hidden>
           <span class="field-label">배터리 표시 <em>이 브라우저는 배터리 정보를 막고 있어요</em></span>
@@ -532,7 +534,9 @@
 </main>
 
 <script src="./vendor/leaflet/leaflet.js"></script>
-<script src="./config.js?v=22"></script>
-<script src="./app.js?v=22"></script>
+<script src="./vendor/maplibre/maplibre-gl.js"></script>
+<script src="./vendor/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
+<script src="./config.js?v=23"></script>
+<script src="./app.js?v=23"></script>
 </body>
 </html>
