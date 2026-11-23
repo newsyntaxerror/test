@@ -1,15 +1,22 @@
 /* 우리끼리 서비스 워커 — 앱 껍데기만 캐시해서 홈 화면 앱처럼 빠르게 뜨게 합니다.
-   지도 타일(OpenStreetMap)·Supabase 요청은 캐시하지 않고 그대로 네트워크로 보냅니다. */
-const CACHE = 'urikkiri-v22';
+   지도 벡터 타일(OpenFreeMap)·글꼴·Supabase 요청은 캐시하지 않고 그대로 네트워크로 보냅니다. */
+const CACHE = 'urikkiri-v23';
 const SHELL = [
   './',
   './index.html',
-  './styles.css?v=22',
-  './app.js?v=22',
-  './config.js?v=22',
+  './styles.css?v=23',
+  './app.js?v=23',
+  './config.js?v=23',
   './manifest.json',
   './vendor/leaflet/leaflet.css',
   './vendor/leaflet/leaflet.js',
+  './vendor/maplibre/maplibre-gl.css',
+  './vendor/maplibre/maplibre-gl.js',
+  './vendor/maplibre-gl-leaflet/leaflet-maplibre-gl.js',
+  './styles/positron.json',
+  './styles/liberty.json',
+  './styles/bright.json',
+  './styles/dark.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',

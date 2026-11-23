@@ -12,7 +12,6 @@
     SUPABASE_URL: '',
     SUPABASE_ANON_KEY: '',
     REFRESH_SECONDS: 10,
-    CARTO_KEY: '',          // CARTO 지도 타일 키(무료: carto.com/basemaps/apikey). 비우면 대체 타일 사용
   }, window.APP_CONFIG || {});
 
   const SUPABASE_URL = String(CFG.SUPABASE_URL || '').trim().replace(/\/+$/, '');
@@ -23,51 +22,45 @@
   const REFRESH_MS = Math.max(5, Number(CFG.REFRESH_SECONDS) || 10) * 1000;
   const STALE_MS = 10 * 60 * 1000;                          // 10분 넘게 갱신 없으면 '오프라인'
   const PALETTE = ['#0fb9a3', '#f59e0b', '#6366f1', '#ec4899', '#8b5cf6', '#0ea5e9', '#ef4444', '#14b8a6'];
-  const APP_VERSION = 'v22';
+  const APP_VERSION = 'v23';
 
-  /* ── 지도 스타일(타일) — 지도 화면에서 바로 바꿔 볼 수 있어요 ──
-     CARTO 래스터 타일은 2026-09-25 부터 키가 필요합니다. config.js 의 CARTO_KEY 를
-     채우면 파스텔(Voyager)·미니멀(Positron)·다크(Dark Matter)가 그대로 나오고,
-     비어 있으면 키가 필요 없는 대체 타일(OSM 색 보정 / Esri Dark Gray)로 보여집니다. */
+  /* ── 지도 스타일 — 벡터 지도(OpenFreeMap + MapLibre GL) ──
+     도로·건물·지명을 벡터로 그려서 확대해도(레티나 DPR 3) 선과 글자가 깨지지 않습니다.
+     · 스타일: styles/{positron,liberty,bright,dark}.json — 지명은 한국어 우선으로 다듬은 사본
+     · 타일·글꼴·아이콘: OpenFreeMap (무료·키 없음, https://openfreemap.org)
+     · 벡터를 못 쓰는 환경(WebGL 꺼짐 등)에서는 OSM 래스터 타일로 자동 대체합니다. */
   const MAP_STYLE_KEY = 'urikkiri.mapStyle.v1';
-  const CARTO_KEY = String(CFG.CARTO_KEY || '').trim();
   const MAP_ATTR_OSM = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 기여자';
-  const MAP_ATTR_CARTO = MAP_ATTR_OSM + ' &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+  const MAP_ATTR_VECTOR = MAP_ATTR_OSM
+    + ' · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>'
+    + ' · <a href="https://www.openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a>';
   const OSM_TILE = { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: MAP_ATTR_OSM, subdomains: 'abc' };
+  const vectorStyleUrl = (name) => './styles/' + name + '.json?v=23';
   const MAP_STYLES = {
-    voyager: {
-      name: '파스텔', sub: 'Voyager', dark: false,
-      carto: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      fallback: Object.assign({}, OSM_TILE, { filter: 'saturate(.45) brightness(1.08) contrast(.88)' }),
-    },
     positron: {
-      name: '미니멀', sub: 'Positron', dark: false,
-      carto: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      name: '미니멀', sub: 'Positron', dark: false, vector: 'positron',
       fallback: Object.assign({}, OSM_TILE, { filter: 'grayscale(.88) brightness(1.07) contrast(.9)' }),
     },
-    dark: {
-      name: '다크', sub: 'Dark Matter', dark: true,
-      carto: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      fallback: Object.assign({}, OSM_TILE, { filter: 'invert(1) hue-rotate(180deg) brightness(.98) contrast(1.05) saturate(.72)' }),
+    liberty: {
+      name: '파스텔', sub: 'Liberty', dark: false, vector: 'liberty',
+      fallback: Object.assign({}, OSM_TILE, { filter: 'saturate(.55) brightness(1.05) contrast(.92)' }),
     },
-    osm: {
-      name: '기본', sub: 'OpenStreetMap', dark: false, carto: null,
+    bright: {
+      name: '밝게', sub: 'Bright', dark: false, vector: 'bright',
       fallback: Object.assign({}, OSM_TILE, { filter: 'none' }),
     },
+    dark: {
+      name: '다크', sub: 'Dark', dark: true, vector: 'dark',
+      fallback: Object.assign({}, OSM_TILE, { filter: 'invert(1) hue-rotate(180deg) brightness(.98) contrast(1.05) saturate(.72)' }),
+    },
   };
-  const MAP_STYLE_ORDER = ['voyager', 'positron', 'dark', 'osm'];
-  const mapStyleKey = (key) => (Object.prototype.hasOwnProperty.call(MAP_STYLES, key) ? key : 'voyager');
+  const MAP_STYLE_ORDER = ['liberty', 'positron', 'bright', 'dark'];
+  const MAP_STYLE_DEFAULT = 'liberty';
+  const mapStyleKey = (key) => (Object.prototype.hasOwnProperty.call(MAP_STYLES, key) ? key : MAP_STYLE_DEFAULT);
 
-  /* 지금 설정으로 실제 쓸 타일 주소·필터 */
+  /* 벡터를 못 쓰는 환경에서만 쓰는 OSM 래스터 대체 타일 */
   function mapTileSource(key) {
-    const s = MAP_STYLES[mapStyleKey(key)];
-    if (CARTO_KEY && s.carto) {
-      return {
-        url: s.carto + (s.carto.indexOf('?') >= 0 ? '&' : '?') + 'key=' + encodeURIComponent(CARTO_KEY),
-        attribution: MAP_ATTR_CARTO, subdomains: 'abcd', filter: 'none',
-      };
-    }
-    return s.fallback;
+    return MAP_STYLES[mapStyleKey(key)].fallback;
   }
   const EMOJIS = ['🙂', '🙌', '🏃', '🚇', '💼', '🏠', '🍜', '😴'];
   const POKE_EMOJIS = ['👋', '❤️', '☕', '📍', '😆'];
@@ -541,8 +534,11 @@
     messages: new Map(),      // friend_id → 메시지 배열
     memberSortAt: new Map(),  // 정렬용
     map: null,
-    mapStyle: mapStyleKey(LS.get(MAP_STYLE_KEY, 'voyager')),  // 지도 타일 스타일
-    tile: null,               // 현재 지도 타일 레이어
+    mapStyle: mapStyleKey(LS.get(MAP_STYLE_KEY, MAP_STYLE_DEFAULT)),  // 지도 스타일
+    tile: null,               // 현재 OSM 래스터 타일 레이어(대체용)
+    glLayer: null,            // 현재 벡터 지도 레이어(MapLibre GL)
+    styleTimer: null,         // 벡터 스타일 로드 감시 타이머
+    vecAttr: '',              // 벡터 지도 저작권 표시
     routeCasing: null,        // 동선 테두리 폴리라인(다크 지도에서 색 반전용)
     markers: new Map(),
     markerSig: new Map(),
@@ -1964,18 +1960,112 @@
     });
   }
 
-  /* 지도 스타일 적용: 타일 교체 + 다크일 때 핀/라벨·저작권 표시 시인성 보정 */
+  /* 이 브라우저가 벡터 지도(MapLibre GL)를 그릴 수 있는지 — WebGL2/1 캔버스를 직접 확인 */
+  function vectorMapSupported() {
+    if (typeof L === 'undefined' || typeof L.maplibreGL !== 'function') return false;
+    if (typeof maplibregl === 'undefined' || !maplibregl.Map) return false;
+    try {
+      const probe = document.createElement('canvas');
+      const gl = probe.getContext('webgl2') || probe.getContext('webgl');
+      if (!gl) return false;
+      const lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function removeBaseLayers() {
+    if (!state.map) return;
+    clearTimeout(state.styleTimer);
+    state.styleTimer = null;
+    if (state.glLayer) {
+      try { state.map.removeLayer(state.glLayer); } catch (e) {}
+      state.glLayer = null;
+    }
+    if (state.tile) {
+      try { state.map.removeLayer(state.tile); } catch (e) {}
+      state.tile = null;
+    }
+    if (state.vecAttr && state.map.attributionControl) {
+      state.map.attributionControl.removeAttribution(state.vecAttr);
+      state.vecAttr = '';
+    }
+    const pane = state.map.getPane('tilePane');
+    if (pane) pane.style.filter = 'none';   // 벡터 캔버스에 CSS 필터를 걸면 흐려집니다
+  }
+
+  /* 벡터 지도가 안 뜨면(WebGL 꺼짐·스타일/타일 실패) 조용히 OSM 래스터로 바꿉니다. */
+  function useRasterFallback(key) {
+    if (!state.map) return;
+    if (state.glLayer) {
+      try { state.map.removeLayer(state.glLayer); } catch (e) {}
+      state.glLayer = null;
+    }
+    if (state.vecAttr && state.map.attributionControl) {
+      state.map.attributionControl.removeAttribution(state.vecAttr);
+      state.vecAttr = '';
+    }
+    if (!state.tile) {
+      state.tile = makeTileLayer(key);
+      state.tile.addTo(state.map);
+    }
+    const pane = state.map.getPane('tilePane');
+    if (pane) pane.style.filter = mapTileSource(key).filter || 'none';
+    if (el.mapStyleNote) {
+      el.mapStyleNote.textContent = '벡터 지도를 못 불러와 OSM으로 대신 보여줘요';
+      el.mapStyleNote.hidden = false;
+    }
+  }
+
+  /* 지도 스타일 적용: 벡터 스타일 교체 + 다크일 때 핀/라벨·저작권 표시 시인성 보정 */
   function applyMapStyle(key, opts = {}) {
     const next = mapStyleKey(key);
     const s = MAP_STYLES[next];
     state.mapStyle = next;
 
     if (state.map) {
-      if (state.tile) state.map.removeLayer(state.tile);
-      state.tile = makeTileLayer(next);
-      state.tile.addTo(state.map);
-      const pane = state.map.getPane('tilePane');
-      if (pane) pane.style.filter = mapTileSource(next).filter || 'none';
+      removeBaseLayers();
+      let vector = false;
+      if (vectorMapSupported()) {
+        try {
+          const layer = L.maplibreGL({
+            style: vectorStyleUrl(s.vector),
+            pane: 'tilePane',
+            padding: 0.1,
+            interactive: false,      // 지도 조작은 Leaflet 이 합니다(핀·동선·팝업 그대로)
+            attributionControl: false,
+          }).addTo(state.map);
+          const glMap = layer.getMaplibreMap();
+          state.glLayer = layer;
+          state.vecAttr = MAP_ATTR_VECTOR;
+          if (state.map.attributionControl) state.map.attributionControl.addAttribution(MAP_ATTR_VECTOR);
+          vector = true;
+          if (el.mapStyleNote) el.mapStyleNote.hidden = true;
+
+          glMap.once('load', () => {
+            if (state.mapStyle !== next) return;
+            clearTimeout(state.styleTimer);
+            state.styleTimer = null;
+            if (el.mapStyleNote) el.mapStyleNote.hidden = true;
+          });
+          glMap.on('error', () => {
+            if (state.mapStyle !== next || !state.glLayer) return;
+            let ok = true;
+            try { ok = glMap.isStyleLoaded(); } catch (e) { ok = false; }
+            if (!ok) useRasterFallback(next);
+          });
+          // 스타일이 8초 안에 안 뜨면(회사/학교 와이파이 차단 등) 래스터로 대체
+          state.styleTimer = setTimeout(() => {
+            if (state.mapStyle !== next || !state.glLayer) return;
+            let ok = false;
+            try { ok = glMap.isStyleLoaded(); } catch (e) { ok = false; }
+            if (!ok) useRasterFallback(next);
+          }, 8000);
+        } catch (e) {
+          vector = false;
+        }
+      }
+      if (!vector) useRasterFallback(next);
     }
 
     const dark = !!s.dark;
@@ -1987,7 +2077,6 @@
       el.btnMapStyle.setAttribute('title', '지도 스타일: ' + s.name);
     }
     if (el.mapStyleDot) el.mapStyleDot.setAttribute('data-style', next);
-    if (el.mapStyleNote) el.mapStyleNote.hidden = !!CARTO_KEY;
     if (el.mapStyleMenu) {
       el.mapStyleMenu.querySelectorAll('[data-map-style]').forEach((btn) => {
         const on = btn.getAttribute('data-map-style') === next;
@@ -2029,6 +2118,12 @@
     state.routeGroup = L.layerGroup().addTo(map);
     state.map = map;
     applyMapStyle(state.mapStyle, { save: false });
+    // 시트 접기/펼치기 등으로 지도 크기가 바뀌면 벡터 캔버스도 같이 맞춥니다.
+    map.on('resize', () => {
+      const gl = state.glLayer && state.glLayer.getMaplibreMap();
+      if (!gl) return;
+      try { gl.resize(); } catch (e) {}
+    });
     setTimeout(() => map.invalidateSize(), 60);
   }
 
