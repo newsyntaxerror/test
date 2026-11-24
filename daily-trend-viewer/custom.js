@@ -11,14 +11,15 @@
 
   var STORE_KEY = "dtv.custom.v1";
 
-  // 기본 카테고리 표 (앞의 세 개는 달콩 님 관심 분야)
+  // 기본 카테고리 표 (앞의 네 개는 달콩 님 관심 분야)
   // slug: collect.py가 만든 data/videos_<slug>_<period>_<shorts>.json 파일 이름
+  // on: 처음 열었을 때 상단 칩에 보일지 (나머지는 ⚙️ 설정에서 켜면 됩니다)
   var BUILTIN = [
     { name: "전체", slug: "all", keywords: [], lock: true },
-    { name: "육아·살림", slug: "parenting", keywords: ["육아", "이유식", "아기", "기저귀", "육퇴", "살림", "집안일", "정리", "청소", "주부", "어린이집"] },
-    { name: "쿠파스·쇼핑템", slug: "shopping", keywords: ["쿠팡", "추천템", "꿀템", "가성비", "생활템", "살림템", "쇼핑", "리뷰", "파트너스", "최저가"] },
-    { name: "예짜·밈", slug: "memes", keywords: ["짜집기", "예능", "레전드", "밈", "웃긴", "짤", "명장면"] },
-    { name: "AI", slug: "ai", keywords: ["AI", "인공지능", "sora", "runway", "kling", "veo", "생성"] },
+    { name: "육아·살림", slug: "parenting", on: true, keywords: ["육아", "이유식", "아기", "기저귀", "육퇴", "살림", "집안일", "정리", "청소", "주부", "어린이집"] },
+    { name: "쿠파스·쇼핑템", slug: "shopping", on: true, keywords: ["쿠팡", "추천템", "꿀템", "가성비", "생활템", "살림템", "쇼핑", "리뷰", "파트너스", "최저가"] },
+    { name: "예짜·밈", slug: "memes", on: true, keywords: ["짜집기", "예능", "레전드", "밈", "웃긴", "짤", "명장면"] },
+    { name: "AI", slug: "ai", on: true, keywords: ["AI", "인공지능", "sora", "runway", "kling", "veo", "생성"] },
     { name: "먹방", slug: "mukbang", keywords: ["먹방", "대식", "먹스타"] },
     { name: "뷰티/패션", slug: "beauty", keywords: ["뷰티", "메이크업", "패션", "코디"] },
     { name: "브이로그", slug: "vlog", keywords: ["브이로그", "일상"] },
@@ -52,7 +53,7 @@
     return {
       v: 1,
       categories: BUILTIN.map(function (b) {
-        return { name: b.name, slug: b.slug || null, keywords: b.keywords.slice(), enabled: true, lock: !!b.lock };
+        return { name: b.name, slug: b.slug || null, keywords: b.keywords.slice(), enabled: !!b.lock || b.on === true, lock: !!b.lock };
       }),
       accounts: { youtube: [], instagram: [], tiktok: [], threads: [], x: [] }
     };

@@ -354,7 +354,7 @@ async function loadVideos(force = false) {
     vidData = data.videos || [];
     vidHasLikes = vidData.some(v => v.likes);
     DTVCustom.renderAccountShortcuts('youtube', []);
-    note.textContent = data.note || '';
+    note.textContent = vidData.length ? (data.note || '') : '';
     if (!vidData.length) {
       status.style.display = 'block';
       status.textContent = data.emptyReason || '결과가 없습니다.';
