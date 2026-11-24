@@ -284,7 +284,7 @@
   </div>
 </div>
 
-<script src="custom.js"></script>
+<script src="custom.js?v=20261125d"></script>
 <script>
 const state = { tab: 'youtube', category: '전체', period: 'week', categories: ['전체'], search: '', kwOnly: false };
 
@@ -353,7 +353,7 @@ async function loadVideos(force = false) {
     vidData = data.videos || [];
     vidHasLikes = vidData.some(v => v.likes);
     DTVCustom.renderAccountShortcuts('youtube', []);
-    note.textContent = data.note || '';
+    note.textContent = vidData.length ? (data.note || '') : '';
     if (!vidData.length) {
       status.style.display = 'block';
       status.textContent = data.emptyReason || '결과가 없습니다.';

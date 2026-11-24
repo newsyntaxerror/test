@@ -11,14 +11,15 @@
 
   var STORE_KEY = "dtv.custom.v1";
 
-  // 기본 카테고리 표 (앞의 세 개는 달콩 님 관심 분야)
+  // 기본 카테고리 표 (앞의 네 개는 달콩 님 관심 분야)
   // slug: collect.py가 만든 data/videos_<slug>_<period>_<shorts>.json 파일 이름
+  // on: 처음 열었을 때 상단 칩에 보일지 (나머지는 ⚙️ 설정에서 켜면 됩니다)
   var BUILTIN = [
     { name: "전체", slug: "all", keywords: [], lock: true },
-    { name: "육아·살림", slug: "parenting", keywords: ["육아", "이유식", "아기", "기저귀", "육퇴", "살림", "집안일", "정리", "청소", "주부", "어린이집"] },
-    { name: "쿠파스·쇼핑템", slug: "shopping", keywords: ["쿠팡", "추천템", "꿀템", "가성비", "생활템", "살림템", "쇼핑", "리뷰", "파트너스", "최저가"] },
-    { name: "예짜·밈", slug: "memes", keywords: ["짜집기", "예능", "레전드", "밈", "웃긴", "짤", "명장면"] },
-    { name: "AI", slug: "ai", keywords: ["AI", "인공지능", "sora", "runway", "kling", "veo", "생성"] },
+    { name: "육아·살림", slug: "parenting", on: true, keywords: ["육아", "이유식", "아기", "기저귀", "육퇴", "살림", "집안일", "수납", "청소", "주부", "어린이집"] },
+    { name: "쿠파스·쇼핑템", slug: "shopping", on: true, keywords: ["쿠팡", "추천템", "꿀템", "가성비", "생활템", "살림템", "내돈내산", "언박싱", "다이소", "최저가"] },
+    { name: "예짜·밈", slug: "memes", on: true, keywords: ["짜집기", "예능", "레전드", "밈", "웃긴", "짤", "명장면"] },
+    { name: "AI", slug: "ai", on: true, keywords: ["AI", "인공지능", "sora", "runway", "kling", "veo", "생성"] },
     { name: "먹방", slug: "mukbang", keywords: ["먹방", "대식", "먹스타"] },
     { name: "뷰티/패션", slug: "beauty", keywords: ["뷰티", "메이크업", "패션", "코디"] },
     { name: "브이로그", slug: "vlog", keywords: ["브이로그", "일상"] },
@@ -52,7 +53,7 @@
     return {
       v: 1,
       categories: BUILTIN.map(function (b) {
-        return { name: b.name, slug: b.slug || null, keywords: b.keywords.slice(), enabled: true, lock: !!b.lock };
+        return { name: b.name, slug: b.slug || null, keywords: b.keywords.slice(), enabled: !!b.lock || b.on === true, lock: !!b.lock };
       }),
       accounts: { youtube: [], instagram: [], tiktok: [], threads: [], x: [] }
     };
@@ -221,17 +222,28 @@
 
     if (search) {
       var tokens = search.toLowerCase().split(/\s+/).filter(Boolean);
+      var periodLabel = { day: "오늘", week: "이번 주", month: "이번 달" }[period] || "이번 주";
       return getPool(period, shorts).then(function (pool) {
         var vids = (pool.videos || []).filter(function (v) {
           var hay = ((v.title || "") + " " + (v.channel || "")).toLowerCase();
           return tokens.every(function (t) { return hay.indexOf(t) !== -1; });
         });
-        return {
+        var base = {
           videos: vids.slice(0, 60),
           fetchedAt: pool.fetchedAt,
-          note: "‘" + search + "’ 검색 결과 · 수집된 영상 전체에서 찾았어요",
-          emptyReason: "‘" + search + "’에 맞는 영상이 이번 수집분에 없습니다. 다른 단어로 검색하거나 유튜브에서 직접 찾아보세요."
+          note: "‘" + search + "’ 검색 결과 · " + periodLabel + " 수집분에서 찾았어요",
+          emptyReason: "‘" + search + "’에 맞는 영상이 " + periodLabel + " 수집분에 없습니다. 다른 단어로 검색하거나 유튜브에서 직접 찾아보세요."
         };
+        if (vids.length) return base;
+        // 이 탭에 없으면 반대쪽(쇼츠/일반) 풀에도 있는지 확인해 안내합니다
+        return getPool(period, !shorts).then(function (other) {
+          var n = (other.videos || []).filter(function (v) {
+            var hay = ((v.title || "") + " " + (v.channel || "")).toLowerCase();
+            return tokens.every(function (t) { return hay.indexOf(t) !== -1; });
+          }).length;
+          if (n) base.emptyReason = "‘" + search + "’에 맞는 영상이 이 탭에는 없지만 " + (shorts ? "유튜브" : "쇼츠") + " 탭에 " + n + "개 있어요. 탭을 바꿔 보세요.";
+          return base;
+        });
       });
     }
 
@@ -424,8 +436,9 @@
     "  header{padding:10px 12px;gap:8px}",
     "  header h1{font-size:17px}",
     "  #today{font-size:11.5px;order:9;width:100%}",
-    "  #searchForm{order:3;width:100%;margin-left:0}",
-    "  #searchInput{width:100%;font-size:16px}",
+    "  #searchForm{order:3;width:100%;margin-left:0;flex-wrap:nowrap}",
+    "  #searchInput{flex:1;width:auto;min-width:0;font-size:16px}",
+    "  #searchBtn{flex:0 0 auto;white-space:nowrap}",
     "  #customBtn,#refreshBtn{padding:8px 11px;font-size:12.5px}",
     "  .tabs{padding:10px 12px 0;gap:6px}",
     "  .tab{padding:8px 12px;font-size:13px}",
