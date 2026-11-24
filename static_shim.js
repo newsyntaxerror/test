@@ -66,7 +66,7 @@
       "#updated{margin-left:auto}";
     document.head.appendChild(style);
     const badge = document.createElement("div");
-    badge.textContent = "⏱ 1시간마다 자동 수집되는 스냅샷 · 내 분야는 ⚙️에서";
+    badge.textContent = "⏱ 수집된 스냅샷 · 내 분야는 ⚙️에서";
     badge.style.cssText = "color:var(--muted);font-size:12px";
     const upd = document.getElementById("updated");
     if (upd) upd.after(badge);

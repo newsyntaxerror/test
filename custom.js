@@ -555,7 +555,7 @@
       '<button type="button" id="csReset" class="danger">초기화</button></div>' +
       '<div class="cs-msg" id="csMsg"></div>' +
       '<textarea class="cs-preview" id="csPreview" style="display:none" readonly></textarea>' +
-      '<p class="cs-hint" style="margin-top:14px">💡 웹 버전은 1시간마다 수집된 스냅샷이라, 내가 새로 추가한 분야는 이미 모인 영상에서 키워드로 골라 보여줍니다. 이 설정을 복님에게 보내면 다음 수집부터 그 분야를 직접 모아 오게 할 수 있어요.</p>' +
+      '<p class="cs-hint" style="margin-top:14px">💡 웹 버전은 미리 수집해 둔 스냅샷이라, 내가 새로 추가한 분야는 이미 모인 영상에서 키워드로 골라 보여줍니다. 이 설정을 복님에게 보내면 다음 수집부터 그 분야를 직접 모아 오게 할 수 있어요.</p>' +
       "</div></div>";
     document.body.appendChild(sheet);
 
