@@ -16,8 +16,8 @@
   // on: 처음 열었을 때 상단 칩에 보일지 (나머지는 ⚙️ 설정에서 켜면 됩니다)
   var BUILTIN = [
     { name: "전체", slug: "all", keywords: [], lock: true },
-    { name: "육아·살림", slug: "parenting", on: true, keywords: ["육아", "이유식", "아기", "기저귀", "육퇴", "살림", "집안일", "정리", "청소", "주부", "어린이집"] },
-    { name: "쿠파스·쇼핑템", slug: "shopping", on: true, keywords: ["쿠팡", "추천템", "꿀템", "가성비", "생활템", "살림템", "쇼핑", "리뷰", "파트너스", "최저가"] },
+    { name: "육아·살림", slug: "parenting", on: true, keywords: ["육아", "이유식", "아기", "기저귀", "육퇴", "살림", "집안일", "수납", "청소", "주부", "어린이집"] },
+    { name: "쿠파스·쇼핑템", slug: "shopping", on: true, keywords: ["쿠팡", "추천템", "꿀템", "가성비", "생활템", "살림템", "내돈내산", "언박싱", "다이소", "최저가"] },
     { name: "예짜·밈", slug: "memes", on: true, keywords: ["짜집기", "예능", "레전드", "밈", "웃긴", "짤", "명장면"] },
     { name: "AI", slug: "ai", on: true, keywords: ["AI", "인공지능", "sora", "runway", "kling", "veo", "생성"] },
     { name: "먹방", slug: "mukbang", keywords: ["먹방", "대식", "먹스타"] },
