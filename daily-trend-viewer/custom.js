@@ -222,17 +222,28 @@
 
     if (search) {
       var tokens = search.toLowerCase().split(/\s+/).filter(Boolean);
+      var periodLabel = { day: "오늘", week: "이번 주", month: "이번 달" }[period] || "이번 주";
       return getPool(period, shorts).then(function (pool) {
         var vids = (pool.videos || []).filter(function (v) {
           var hay = ((v.title || "") + " " + (v.channel || "")).toLowerCase();
           return tokens.every(function (t) { return hay.indexOf(t) !== -1; });
         });
-        return {
+        var base = {
           videos: vids.slice(0, 60),
           fetchedAt: pool.fetchedAt,
-          note: "‘" + search + "’ 검색 결과 · 수집된 영상 전체에서 찾았어요",
-          emptyReason: "‘" + search + "’에 맞는 영상이 이번 수집분에 없습니다. 다른 단어로 검색하거나 유튜브에서 직접 찾아보세요."
+          note: "‘" + search + "’ 검색 결과 · " + periodLabel + " 수집분에서 찾았어요",
+          emptyReason: "‘" + search + "’에 맞는 영상이 " + periodLabel + " 수집분에 없습니다. 다른 단어로 검색하거나 유튜브에서 직접 찾아보세요."
         };
+        if (vids.length) return base;
+        // 이 탭에 없으면 반대쪽(쇼츠/일반) 풀에도 있는지 확인해 안내합니다
+        return getPool(period, !shorts).then(function (other) {
+          var n = (other.videos || []).filter(function (v) {
+            var hay = ((v.title || "") + " " + (v.channel || "")).toLowerCase();
+            return tokens.every(function (t) { return hay.indexOf(t) !== -1; });
+          }).length;
+          if (n) base.emptyReason = "‘" + search + "’에 맞는 영상이 이 탭에는 없지만 " + (shorts ? "유튜브" : "쇼츠") + " 탭에 " + n + "개 있어요. 탭을 바꿔 보세요.";
+          return base;
+        });
       });
     }
 
