@@ -222,10 +222,13 @@
   function label(ctx, text, x, y, o) {
     const opt = o || {};
     const size = opt.size || 22;
+    const maxW = opt.maxW || 900;
     const spec = { family: opt.family || 'pretendard', weight: opt.weight || 700, size, tracking: opt.tracking == null ? 0.18 : opt.tracking, lineHeight: 1.2 };
-    const lines = R.layout(text, opt.maxW || 900, spec);
+    const lines = R.layout(text, maxW, spec);
+    // 오른쪽 정렬은 x를 '오른쪽 끝'으로 받습니다
+    const left = (opt.align === 'right') ? x - maxW : x;
     drawLines(ctx, lines, {
-      x, y, maxW: opt.maxW || 900, spec,
+      x: left, y, maxW, spec,
       color: opt.color || '#888', align: opt.align || 'left',
     });
   }
@@ -665,13 +668,6 @@
       if (titleLines.length > 3) titleLines = titleLines.slice(0, 3);
     }
     const titleTop = g.top + (s.headerBand ? 176 : 92);
-    if (titleLines.length) {
-      drawLines(ctx, titleLines, {
-        x: box0.x, y: titleTop + ts.size * 0.84, maxW: box0.w, spec: ts, color: ink,
-        align: s.align, highlight: onFullPhoto ? 'rgba(255,255,255,.26)' : s.highlight,
-        boldColor: ink,
-      });
-    }
     const box = R.bodyBox(s, g.H > 1500 ? '9:16' : '4:5', titleLines.length);
 
     // 본문 (자동 축소 → 그래도 넘치면 말줄임 + 경고)
@@ -703,7 +699,20 @@
     }
     if (fit.length === 0 && text.trim()) { fit.push([]); overflow = true; }
 
-    let y = box.y + spec.size * 0.86;
+    // 짧은 카드는 글이 위에 몰리지 않도록 살짝 아래로 균형을 잡습니다
+    const contentBottom = g.H - g.bot - 74;
+    const totalH = (titleLines.length ? titleLines.length * ts.size * 1.2 + 26 : 0) + used;
+    const free = (contentBottom - titleTop) - totalH;
+    const shift = free > 0 ? Math.min(free * 0.34, s.headerBand ? 130 : 170) : 0;
+    if (titleLines.length) {
+      drawLines(ctx, titleLines, {
+        x: box0.x, y: titleTop + shift + ts.size * 0.84, maxW: box0.w, spec: ts, color: ink,
+        align: s.align, highlight: onFullPhoto ? 'rgba(255,255,255,.26)' : s.highlight,
+        boldColor: ink,
+      });
+    }
+
+    let y = box.y + shift + spec.size * 0.86;
     fit.forEach((b, i) => {
       if (i) y += gap;
       y = drawLines(ctx, b, {
@@ -738,12 +747,13 @@
       titleLines = R.layout(card.title, w, momentSpec(ts)).slice(0, 2);
       drawLines(ctx, titleLines, { x: g.padX, y: titleTop + ts.size * 0.84, maxW: w, spec: momentSpec(ts), color: s.ink, align: s.align, highlight: s.highlight, boldColor: s.ink });
     }
-    const top = titleTop + (titleLines.length ? titleLines.length * ts.size * 1.2 + 40 : 0) + 8;
+    const top0 = titleTop + (titleLines.length ? titleLines.length * ts.size * 1.2 + 40 : 0) + 8;
     const bottom = g.H - g.bot - 90;
-    const availH = bottom - top;
-    const rowH = clamp(Math.floor(availH / rows.length), 46, 110);
-    const tableH = rowH * rows.length;
-    const headH = Math.min(rowH, 76);
+    const availH0 = bottom - top0;
+    const rowH = clamp(Math.floor(availH0 / rows.length), 46, 132);
+    const headH = Math.min(rowH, 84);
+    const tableH = headH + rowH * (rows.length - 1);
+    const top = top0 + Math.max(0, (availH0 - tableH) * 0.22);
     const cellPad = 20;
     const colW = [];
     for (let c = 0; c < cols; c++) colW.push(1);
@@ -765,7 +775,7 @@
         ctx.fillStyle = isDark(s.bg && s.bg.color) ? 'rgba(255,255,255,.05)' : 'rgba(20,20,25,.035)';
         ctx.fillRect(g.padX, y, w, h);
       }
-      const cellSize = isHead ? 26 : (cols > 3 ? 24 : 27);
+      const cellSize = isHead ? 27 : (cols > 3 ? 25 : 29);
       const spec = { family: s.bodyFont, weight: isHead ? 800 : 500, size: cellSize, tracking: 0, lineHeight: 1.32 };
       let x = g.padX;
       for (let ci = 0; ci < cols; ci++) {
@@ -810,10 +820,11 @@
     }
     const top = titleTop + (titleLines.length ? titleLines.length * ts.size * 1.2 + 42 : 0);
     const bottom = g.H - g.bot - 90;
-    const rowH = clamp(Math.floor((bottom - top) / items.length), 62, 124);
-    const box = 34;
+    const few = items.length <= 4;
+    const box = few ? 40 : 34;
+    const rowH = clamp(Math.floor((bottom - top) / items.length), 62, few ? 168 : 124);
     let y = top + Math.max(0, (bottom - top - rowH * items.length) / 2);
-    const spec = { family: s.bodyFont, weight: 500, size: rowH > 96 ? 34 : 30, tracking: 0, lineHeight: 1.36 };
+    const spec = { family: s.bodyFont, weight: 500, size: few ? 36 : 30, tracking: 0, lineHeight: 1.36 };
     for (const it of items) {
       const cy = y + rowH / 2;
       ctx.lineWidth = 2;
@@ -865,8 +876,25 @@
     }
 
     const cx = W / 2;
-    const avatarR = g.H > 1500 ? 92 : 82;
-    const avatarY = g.H > 1500 ? 600 : 470;
+    const big = g.H > 1500;
+    const avatarR = big ? 96 : 86;
+    const nameSize = big ? 60 : 54;
+    const nameSpec = { family: s.titleFont, weight: s.titleWeight, size: nameSize, tracking: -0.02, lineHeight: 1.2 };
+    const bioSpec = { family: s.bodyFont, weight: 400, size: 28, tracking: 0, lineHeight: 1.56 };
+    const bioLines = acct.bio ? R.layout(acct.bio, W - pad * 2 - 80, bioSpec).slice(0, 3) : [];
+    const noteSpec = { family: s.bodyFont, weight: 500, size: 23, tracking: 0, lineHeight: 1.5 };
+    const noteLines = R.layout(card.body || '저장해두면 나중에 다시 보기 좋아요', W - pad * 2 - 40, noteSpec).slice(0, 2);
+    const btnW = 320, btnH = 84;
+
+    const hAvatar = avatarR * 2 + (big ? 96 : 74);
+    const hName = nameSize * 1.2 + (big ? 28 : 20);
+    const hHandle = 28 * 1.3 + 26;
+    const hBio = bioLines.length ? bioLines.length * 28 * 1.56 + 36 : 0;
+    const hBtn = btnH + (big ? 72 : 56);
+    const hNote = noteLines.length * 23 * 1.5 + 20;
+    const totalH = hAvatar + hName + hHandle + hBio + hBtn + hNote;
+    let cursor = Math.max(g.top + 6, (H - totalH) / 2 - (big ? 26 : 10));
+    const avatarY = cursor + avatarR;
 
     // 아바타
     ctx.save();
@@ -884,7 +912,7 @@
       ctx.fillRect(cx - avatarR, avatarY - avatarR, avatarR * 2, avatarR * 2);
       const letter = (acct.logo || (acct.name || 'M').trim().charAt(0) || 'M').toUpperCase();
       setFont(ctx, s.titleFont, 800, avatarR * 0.92);
-      ctx.fillStyle = onPhoto ? '#111' : (isDark(s.accent) ? '#fff' : '#fff');
+      ctx.fillStyle = isDark(s.accent) || onPhoto ? '#111111' : '#ffffff';
       ctx.textAlign = 'center';
       ctx.fillText(letter, cx, avatarY + avatarR * 0.32);
       ctx.textAlign = 'left';
@@ -893,38 +921,37 @@
     ctx.strokeStyle = onPhoto ? 'rgba(255,255,255,.5)' : s.accent;
     ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(cx, avatarY, avatarR + 6, 0, Math.PI * 2); ctx.stroke();
+    cursor += hAvatar;
 
-    let y = avatarY + avatarR + (g.H > 1500 ? 92 : 78);
-    const nameSpec = { family: s.titleFont, weight: s.titleWeight, size: g.H > 1500 ? 60 : 54, tracking: -0.02, lineHeight: 1.2 };
     drawLines(ctx, R.layout(acct.name || '내 매거진', W - pad * 2, nameSpec), {
-      x: pad, y, maxW: W - pad * 2, spec: nameSpec, color: ink, align: 'center',
+      x: pad, y: cursor + nameSize * 0.9, maxW: W - pad * 2, spec: nameSpec, color: ink, align: 'center',
     });
-    y += nameSpec.size * 1.2 + (g.H > 1500 ? 34 : 26);
-    label(ctx, acct.handle || '@my_magazine', pad, y, { size: 28, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
-    y += 58;
-    if (acct.bio) {
-      const bioSpec = { family: s.bodyFont, weight: 400, size: 28, tracking: 0, lineHeight: 1.56 };
-      drawLines(ctx, R.layout(acct.bio, W - pad * 2 - 80, bioSpec).slice(0, 3), {
-        x: pad + 40, y, maxW: W - pad * 2 - 80, spec: bioSpec, color: sub, align: 'center',
+    cursor += hName;
+
+    label(ctx, acct.handle || '@my_magazine', pad, cursor + 24, { size: 28, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
+    cursor += hHandle;
+
+    if (bioLines.length) {
+      drawLines(ctx, bioLines, {
+        x: pad + 40, y: cursor + 24, maxW: W - pad * 2 - 80, spec: bioSpec, color: sub, align: 'center',
       });
-      y += 30 * 1.56 * 2;
+      cursor += hBio;
     }
 
     // 팔로우 버튼
-    const btnW = 300, btnH = 84;
-    const by = Math.min(y + 40, g.H - g.bot - 150);
+    const by = cursor;
     ctx.fillStyle = onPhoto ? '#fff' : s.accent;
     roundRect(ctx, cx - btnW / 2, by, btnW, btnH, btnH / 2);
     ctx.fill();
     setFont(ctx, s.bodyFont, 800, 30);
-    ctx.fillStyle = isDark(s.accent) || onPhoto ? '#111' : '#fff';
-    if (!onPhoto && !isDark(s.accent)) ctx.fillStyle = '#fff';
+    ctx.fillStyle = isDark(s.accent) || onPhoto ? '#111111' : '#ffffff';
     ctx.textAlign = 'center';
     ctx.fillText('팔로우  +', cx, by + btnH / 2 + 10);
     ctx.textAlign = 'left';
+    cursor += hBtn;
 
-    label(ctx, card.body || '저장해두면 나중에 다시 보기 좋아요', pad, by + btnH + (g.H > 1500 ? 92 : 72), {
-      size: 23, color: sub, tracking: 0, weight: 500, align: 'center', maxW: W - pad * 2, family: s.bodyFont,
+    drawLines(ctx, noteLines, {
+      x: pad + 20, y: cursor + 22, maxW: W - pad * 2 - 40, spec: noteSpec, color: sub, align: 'center',
     });
   }
 

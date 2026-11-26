@@ -173,13 +173,12 @@
   function bindCard(wrap, inner, canvas, card) {
     let tapStart = null;
     canvas.addEventListener('pointerdown', (ev) => {
+      tapStart = { x: ev.clientX, y: ev.clientY, t: Date.now() };
       if (photoMode && card.photo) {
         ev.preventDefault();
         drag = { x: ev.clientX, y: ev.clientY, px: card.photo.x || 0, py: card.photo.y || 0, card, canvas, moved: false };
         canvas.style.cursor = 'grabbing';
         try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* noop */ }
-      } else {
-        tapStart = { x: ev.clientX, y: ev.clientY, t: Date.now() };
       }
     });
     canvas.addEventListener('pointermove', (ev) => {
@@ -195,19 +194,18 @@
     });
     const endDrag = () => {
       if (drag) {
+        canvas._moved = drag.moved;
         drag = null;
         canvas.style.cursor = '';
         save();
         updateMiniStrip();
-        const chip = document.querySelector('.card.photomode');
-        if (chip) chip.classList.add('photomode');
       }
     };
     canvas.addEventListener('pointerup', endDrag);
     canvas.addEventListener('pointercancel', endDrag);
     canvas.addEventListener('click', (ev) => {
-      if (photoMode) return;
       if (tapStart && (Math.abs(ev.clientX - tapStart.x) > 12 || Math.abs(ev.clientY - tapStart.y) > 12)) return;
+      if (photoMode && canvas._moved) { canvas._moved = false; return; }
       const i = state.cards.indexOf(card);
       if (i < 0) return;
       state.cardIndex = i;

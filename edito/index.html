@@ -20,6 +20,12 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;500;600;700;900&family=Black+Han+Sans&family=Do+Hyeon&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <link rel="stylesheet" href="css/app.css">
+<script>
+  /* 개발용 오류 수집기 (화면에는 아무것도 그리지 않습니다) */
+  window.__editoErrors = [];
+  window.addEventListener('error', function (e) { window.__editoErrors.push(String(e.message) + ' @' + (e.filename || '') + ':' + (e.lineno || '')); });
+  window.addEventListener('unhandledrejection', function (e) { window.__editoErrors.push('rejection: ' + String(e.reason)); });
+</script>
 </head>
 <body>
 

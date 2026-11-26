@@ -256,7 +256,18 @@
       if (h) { flush(); blocks.push({ type: h[1].length >= 2 ? 'h2' : 'h1', text: h[2].trim() }); continue; }
 
       const num = t.match(/^(\d{1,2})[.)]\s+(.{1,40})$/);
-      if (num && !/[.!?。]$/.test(t)) { flush(); blocks.push({ type: 'h2', text: num[2].trim(), num: num[1] }); continue; }
+      if (num && !/[.!?。]$/.test(t)) {
+        // 바로 뒤에 이어지는 번호가 있으면 제목이 아니라 목록으로 봅니다 (1. 2. 3.)
+        let isList = false;
+        for (let k = i + 1; k < Math.min(lines.length, i + 3); k++) {
+          const nt = lines[k].trim();
+          if (!nt) continue;
+          const nm = nt.match(/^(\d{1,2})[.)]\s+/);
+          if (nm && Number(nm[1]) === Number(num[1]) + 1) isList = true;
+          break;
+        }
+        if (!isList) { flush(); blocks.push({ type: 'h2', text: num[2].trim(), num: num[1] }); continue; }
+      }
 
       if (t[0] === '|') {
         flush();
@@ -389,8 +400,15 @@
         continue;
       }
       if (b.type === 'table' || b.type === 'check') {
-        flushGroup();
-        const card = { type: b.type, label: curLabel || 'PART 01', title: '' };
+        // 바로 앞 소제목은 표/체크 카드의 제목이 됩니다 (빈 속지 카드를 만들지 않음)
+        let cardTitle = '';
+        if (cur && !cur.paras.length) {
+          cardTitle = cur.title || '';
+          cur = null;
+        } else {
+          flushGroup();
+        }
+        const card = { type: b.type, label: curLabel || 'PART 01', title: cardTitle };
         if (b.type === 'table') card.rows = b.rows;
         else card.items = b.items;
         addCard(card);
