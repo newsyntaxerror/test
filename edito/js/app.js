@@ -17,13 +17,12 @@
   let drag = null;
   let modalUrl = null;
   let busyDepth = 0;
-  let saveTimerForUi = null;
 
   const track = $('track');
   const stage = $('stage');
   const toastEl = $('toast');
 
-  const TITLES = { source: '원고', design: '디자인', card: '카드 편집', check: '점검', save: '저장 · 내보내기' };
+  const TITLES = { source: '원고', design: '디자인', card: '카드 편집', check: '점검', save: '저장 · 내보내기', help: '사용법' };
 
   /* =========================================================
      유틸
@@ -38,11 +37,29 @@
     toast._t = setTimeout(() => toastEl.classList.remove('show'), ms || 2200);
   }
 
-  function save() {
-    const ok = E.saveState(state);
-    if (ok) { clearTimeout(saveTimerForUi); saveTimerForUi = setTimeout(() => { E.saveState(state, true); }, 450); }
-    return ok;
-  }
+  const save = (function () {
+    let timer = null;
+    let warned = false;
+    return function save(now) {
+      if (now) {
+        const ok = E.saveNow(state);
+        if (!ok && !warned) {
+          warned = true;
+          toast('저장 공간이 부족해 사진을 더 담기 어려워요. 카드를 내보낸 뒤 새로 시작해 주세요.', 5200);
+        }
+        return ok;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const ok = E.saveNow(state);
+        if (!ok && !warned) {
+          warned = true;
+          toast('저장 공간이 부족해 사진을 더 담기 어려워요. 카드를 내보낸 뒤 새로 시작해 주세요.', 5200);
+        }
+      }, 400);
+      return true;
+    };
+  })();
 
   function showBusy(text) {
     busyDepth += 1;
@@ -144,6 +161,7 @@
 
   function updateMeter() {
     const total = state.cards.length;
+    track.querySelectorAll('.card').forEach((el, i) => el.classList.toggle('photomode', photoMode && i === state.cardIndex));
     $('cardNo').textContent = total ? String(state.cardIndex + 1) : '0';
     $('cardTotal').textContent = String(total);
     const dots = $('dots');
@@ -912,6 +930,46 @@
   };
 
   /* =========================================================
+     시트 · 사용법
+  ========================================================= */
+  SHEETS.help = {
+    html() {
+      return `
+      <div class="block" style="padding-top:0">
+        <div class="block-title">순서</div>
+        <p class="hint" style="font-size:12.5px;line-height:1.8;color:var(--ink-2)">
+          1. <b>원고</b>에 글을 붙여넣고 <b>카드 만들기</b><br>
+          2. <b>디자인</b>에서 템플릿·비율·글꼴 고르기<br>
+          3. <b>카드</b>에서 문장과 사진 다듬기<br>
+          4. <b>점검</b>에서 표지 잘림·따옴표·캡션 확인<br>
+          5. <b>저장</b>에서 PNG·ZIP 내보내기
+        </p>
+      </div>
+      <div class="block">
+        <div class="block-title">원고 문법</div>
+        <p class="hint" style="line-height:1.95;color:var(--ink-2)">
+          첫 줄 → 표지 제목<br>
+          빈 줄 → 문단 나누기<br>
+          <b># 소제목</b> · <b>1. 소제목</b> → 장 제목<br>
+          <b>**강조**</b> → 형광펜 + 굵게<br>
+          <b>---</b> → 강제로 장 나누기<br>
+          <b>| A | B |</b> → 비교표 카드<br>
+          <b>- [ ] 할 일</b> → 체크리스트 카드
+        </p>
+      </div>
+      <div class="block">
+        <div class="block-title">홈 화면 앱으로 쓰기</div>
+        <p class="hint">Safari에서 이 페이지를 열고 하단 <b>공유 → 홈 화면에 추가</b>를 누르면 앱처럼 전체 화면으로 열려요. 한 번 열어두면 인터넷이 없어도 실행됩니다.</p>
+      </div>
+      <div class="block">
+        <div class="block-title">저장과 프라이버시</div>
+        <p class="hint">작업은 이 브라우저 안에만 저장되고 서버로 보내지 않아요. 워터마크도 붙지 않습니다. 브라우저 데이터를 지우면 함께 사라지니, 완성한 카드는 PNG로 내보내 두세요.</p>
+      </div>`;
+    },
+    bind() {},
+  };
+
+  /* =========================================================
      시트 · 점검
   ========================================================= */
   SHEETS.check = {
@@ -1421,7 +1479,7 @@
   });
 
   $('btnHelp').addEventListener('click', () => {
-    openSheet('source');
+    openSheet('help');
   });
 
   $('btnStart').addEventListener('click', () => openSheet('source'));

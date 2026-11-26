@@ -213,17 +213,19 @@
   };
 
   let saveTimer = null;
+  E.saveNow = function (state) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+      return true;
+    } catch (e) {
+      E.lastSaveError = e;
+      return false;
+    }
+  };
+
   E.saveState = function (state, immediate) {
     clearTimeout(saveTimer);
-    const doSave = () => {
-      try {
-        localStorage.setItem(KEY, JSON.stringify(state));
-        return true;
-      } catch (e) {
-        E.lastSaveError = e;
-        return false;
-      }
-    };
+    const doSave = () => E.saveNow(state);
     if (immediate) return doSave();
     saveTimer = setTimeout(doSave, 500);
     return true;
@@ -535,9 +537,10 @@
     const JOSA = /(은|는|이|가|을|를|의|에|도|와|과|로|으로|에서|에게|부터|까지|만|처럼|만큼)$/;
     for (const raw of words) {
       if (raw.length < 2 || raw.length > 10) continue;
+      if (/^\d/.test(raw)) continue;
       if (/(습니다|합니다|됩니다|입니다|했다|한다|된다|있다|없다|같다|이며|하면|인데|지만)$/.test(raw)) continue;
       let w = raw;
-      if (w.length >= 3) w = w.replace(JOSA, '') || w;
+      if (w.length >= 2) w = w.replace(JOSA, '') || w;
       if (w.length < 2) continue;
       if (/^\d+$/.test(w)) continue;
       if (STOP.indexOf(w) >= 0) continue;

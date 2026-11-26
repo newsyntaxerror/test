@@ -581,6 +581,7 @@
       if (lines.length <= maxTitleLines && hUsed <= (g.H > 1500 ? 820 : 580)) break;
     }
     const titleSpec = { family: s.titleFont, weight: s.titleWeight, size, tracking: s.tracking, lineHeight: 1.16 };
+    lines = lines.slice(0, maxTitleLines);
     const subSpec = { family: s.bodyFont, weight: 400, size: g.H > 1500 ? 34 : 31, tracking: 0, lineHeight: 1.6 };
     const subLines = card.subtitle ? R.layout(card.subtitle, maxW * 0.94, subSpec).slice(0, 3) : [];
     const blockH = lines.length * size * 1.16 + (subLines.length ? 46 + subLines.length * subSpec.size * 1.6 : 0);
