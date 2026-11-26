@@ -411,7 +411,7 @@
 
   /* ---------- 스타일 토큰 ---------- */
   R.bodySpec = function (s, ratio, sizeOverride) {
-    const base = ratio === '9:16' ? 48 : 46;
+    const base = ratio === '9:16' ? 54 : 46;
     return {
       family: s.bodyFont, weight: 400,
       size: Math.round((sizeOverride || base) * s.bodyScale),
@@ -419,7 +419,7 @@
     };
   };
   R.titleSpec = function (s, ratio) {
-    const base = ratio === '9:16' ? 78 : 72;
+    const base = ratio === '9:16' ? 84 : 72;
     return { family: s.titleFont, weight: s.titleWeight, size: Math.round(base * s.titleScale), tracking: s.tracking, lineHeight: 1.2 };
   };
 
@@ -707,7 +707,8 @@
     const contentBottom = g.H - g.bot - 74;
     const totalH = (titleLines.length ? titleLines.length * ts.size * 1.2 + 34 : 0) + used;
     const free = (contentBottom - titleTop) - totalH;
-    const shift = free > 0 ? Math.min(free * 0.3, 160) : 0;
+    const shiftMax = g.H > 1500 ? 420 : 170;
+    const shift = free > 0 ? Math.min(free * (g.H > 1500 ? 0.44 : 0.3), shiftMax) : 0;
     if (titleLines.length) {
       drawLines(ctx, titleLines, {
         x: box0.x, y: titleTop + shift + ts.size * 0.84, maxW: box0.w, spec: ts, color: ink,
@@ -882,23 +883,24 @@
     const cx = W / 2;
     label(ctx, 'THANK YOU', pad, g.top + 24, { size: 22, color: s.accent, tracking: 0.3, weight: 800, align: 'center', maxW: W - pad * 2 });
     const big = g.H > 1500;
-    const avatarR = big ? 128 : 104;
-    const nameSize = big ? 80 : 62;
+    const k = big ? 1.32 : 1;
+    const avatarR = Math.round(104 * k);
+    const nameSize = Math.round(62 * k);
     const nameSpec = { family: s.titleFont, weight: s.titleWeight, size: nameSize, tracking: -0.02, lineHeight: 1.2 };
-    const bioSpec = { family: s.bodyFont, weight: 400, size: big ? 34 : 31, tracking: 0, lineHeight: 1.56 };
+    const bioSpec = { family: s.bodyFont, weight: 400, size: Math.round(31 * k), tracking: 0, lineHeight: 1.56 };
     const bioLines = acct.bio ? R.layout(acct.bio, W - pad * 2 - 80, bioSpec).slice(0, 3) : [];
-    const noteSpec = { family: s.bodyFont, weight: 500, size: big ? 29 : 25, tracking: 0, lineHeight: 1.5 };
+    const noteSpec = { family: s.bodyFont, weight: 500, size: Math.round(25 * k), tracking: 0, lineHeight: 1.5 };
     const noteLines = R.layout(card.body || '저장해두면 나중에 다시 보기 좋아요', W - pad * 2 - 40, noteSpec).slice(0, 2);
-    const btnW = big ? 400 : 348, btnH = big ? 112 : 96;
+    const btnW = Math.round(348 * k), btnH = Math.round(96 * k);
 
-    const hAvatar = avatarR * 2 + (big ? 120 : 82);
-    const hName = nameSize * 1.2 + (big ? 40 : 26);
-    const hHandle = (big ? 38 : 32) * 1.3 + 32;
-    const hBio = bioLines.length ? bioLines.length * bioSpec.size * 1.56 + 44 : 0;
-    const hBtn = btnH + (big ? 90 : 64);
-    const hNote = noteLines.length * noteSpec.size * 1.5 + 20;
+    const hAvatar = avatarR * 2 + Math.round(82 * k);
+    const hName = nameSize * 1.2 + Math.round(26 * k);
+    const hHandle = Math.round(32 * k) * 1.3 + Math.round(30 * k);
+    const hBio = bioLines.length ? bioLines.length * bioSpec.size * 1.56 + Math.round(42 * k) : 0;
+    const hBtn = btnH + Math.round(64 * k);
+    const hNote = noteLines.length * noteSpec.size * 1.5 + Math.round(20 * k);
     const totalH = hAvatar + hName + hHandle + hBio + hBtn + hNote;
-    let cursor = Math.max(g.top + 6, (H - totalH) / 2 - (big ? 26 : 10));
+    let cursor = Math.max(g.top + 6, (H - totalH) / 2 - (big ? 10 : 10));
     const avatarY = cursor + avatarR;
 
     // 아바타
@@ -933,7 +935,7 @@
     });
     cursor += hName;
 
-    label(ctx, acct.handle || '@my_magazine', pad, cursor + 26, { size: big ? 38 : 32, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
+    label(ctx, acct.handle || '@my_magazine', pad, cursor + Math.round(26 * k), { size: Math.round(32 * k), color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
     cursor += hHandle;
 
     if (bioLines.length) {
@@ -948,10 +950,10 @@
     ctx.fillStyle = onPhoto ? '#fff' : s.accent;
     roundRect(ctx, cx - btnW / 2, by, btnW, btnH, btnH / 2);
     ctx.fill();
-    setFont(ctx, s.bodyFont, 800, big ? 38 : 34);
+    setFont(ctx, s.bodyFont, 800, Math.round(34 * k));
     ctx.fillStyle = isDark(s.accent) || onPhoto ? '#111111' : '#ffffff';
     ctx.textAlign = 'center';
-    ctx.fillText('팔로우  +', cx, by + btnH / 2 + 12);
+    ctx.fillText('팔로우  +', cx, by + btnH / 2 + Math.round(12 * k));
     ctx.textAlign = 'left';
     cursor += hBtn;
 
