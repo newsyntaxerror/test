@@ -144,8 +144,13 @@
 
     const log = $('#chatLog');
     if (log) {
-      if (ui.stickBottom || nearBottom) log.scrollTop = log.scrollHeight;
-      else log.scrollTop = prevTop;
+      if (ui.stickBottom || nearBottom) {
+        log.scrollTop = log.scrollHeight;
+        requestAnimationFrame(() => {
+          const l2 = document.getElementById('chatLog');
+          if (l2 && (ui.stickBottom || nearBottom)) l2.scrollTop = l2.scrollHeight;
+        });
+      } else log.scrollTop = prevTop;
       log.addEventListener('scroll', () => {
         ui.stickBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 90;
       }, { passive: true });
