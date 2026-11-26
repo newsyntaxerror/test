@@ -138,7 +138,7 @@
       : ui.tab === 'team' ? teamMarkup()
       : memosMarkup();
 
-    document.body.classList.toggle('lock-scroll', ui.tab === 'room');
+    document.body.classList.remove('lock-scroll');
     sizeRoom();
     paintChrome();
 
@@ -194,11 +194,13 @@
 
   function sizeRoom() {
     const grid = $('#roomGrid');
-    if (!grid) { document.body.style.removeProperty('--room-h'); return; }
+    if (!grid) { document.body.classList.remove('lock-scroll'); return; }
     const rect = grid.getBoundingClientRect();
     const appPad = parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom) || 0;
     const avail = window.innerHeight - rect.top - appPad - 4;
+    const fits = avail >= (isMobile() ? 430 : 470);
     grid.style.height = Math.max(isMobile() ? 380 : 460, avail) + 'px';
+    document.body.classList.toggle('lock-scroll', fits);
   }
   window.addEventListener('resize', () => {
     if (ui.tab === 'room') sizeRoom();
@@ -894,12 +896,12 @@
       <div class="divider"></div>
 
       <div>
-        <div class="pane-title">데이터</div>
+        <div class="pane-title">데이터 · 앱 설치</div>
         <div class="key-row">
           <button class="btn sm" data-act="export">JSON 내보내기</button>
           <button class="btn sm danger" data-act="reset-local">이 기기 데이터 초기화</button>
         </div>
-        <p class="pane-desc" style="margin-top:8px">달콩 비서실 · v1 · ${S.sync.mode === 'live' ? '실시간' : '로컬'} 모드<br>대화 ${S.state.messages.length} · 작업 ${S.state.tasks.length} · 메모 ${S.state.memos.length}</p>
+        <p class="pane-desc" style="margin-top:8px">아이폰은 <b>공유 → 홈 화면에 추가</b>, 안드로이드는 Chrome 메뉴의 <b>앱 설치</b>를 누르면 앱처럼 열립니다.<br>달콩 비서실 · v1 · ${S.sync.mode === 'live' ? '실시간' : '로컬'} 모드<br>대화 ${S.state.messages.length} · 작업 ${S.state.tasks.length} · 메모 ${S.state.memos.length}</p>
       </div>`;
   }
 

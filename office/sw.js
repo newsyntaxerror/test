@@ -1,16 +1,16 @@
 /* 달콩 비서실 서비스 워커 — 앱 껍데기만 캐시합니다.
    Supabase · AI API 요청은 캐시하지 않고 그대로 네트워크로 보냅니다. */
-const CACHE = 'dalkong-office-v1';
+const CACHE = 'dalkong-office-v2';
 const SHELL = [
   './',
   './index.html',
-  './styles.css?v=1',
-  './app.js?v=1',
-  './store.js?v=1',
-  './ai.js?v=1',
-  './config.js?v=1',
+  './styles.css?v=2',
+  './app.js?v=2',
+  './store.js?v=2',
+  './ai.js?v=2',
+  './config.js?v=2',
   './manifest.json',
-  './vendor/supabase.js',
+  './vendor/supabase.js?v=2',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
