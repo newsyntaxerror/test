@@ -73,7 +73,7 @@
     const w = stage.clientWidth;
     const h = stage.clientHeight;
     const ar = state.ratio === '9:16' ? 9 / 16 : 4 / 5;
-    const maxW = Math.max(180, Math.min(w * 0.86, (h - 18) * ar));
+    const maxW = Math.max(180, Math.min(w * 0.9, (h - 18) * ar));
     document.documentElement.style.setProperty('--card-w', Math.round(maxW) + 'px');
   }
 

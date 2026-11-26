@@ -411,7 +411,7 @@
 
   /* ---------- 스타일 토큰 ---------- */
   R.bodySpec = function (s, ratio, sizeOverride) {
-    const base = ratio === '9:16' ? 45 : 42;
+    const base = ratio === '9:16' ? 48 : 46;
     return {
       family: s.bodyFont, weight: 400,
       size: Math.round((sizeOverride || base) * s.bodyScale),
@@ -419,7 +419,7 @@
     };
   };
   R.titleSpec = function (s, ratio) {
-    const base = ratio === '9:16' ? 66 : 62;
+    const base = ratio === '9:16' ? 70 : 66;
     return { family: s.titleFont, weight: s.titleWeight, size: Math.round(base * s.titleScale), tracking: s.tracking, lineHeight: 1.2 };
   };
 
@@ -477,12 +477,12 @@
       ctx.fillRect(g.padX, y - 20, 26, 3);
       label(ctx, text, g.padX + 40, y, { size: 20, color: light ? s.accent : s.accent, tracking: 0.24, weight: 800, family: s.bodyFont });
     } else {
-      label(ctx, text, g.padX, y, { size: 21, color: s.accent, tracking: 0.2, weight: 800, family: s.bodyFont });
+      label(ctx, text, g.padX, y, { size: 23, color: s.accent, tracking: 0.2, weight: 800, family: s.bodyFont });
       ctx.strokeStyle = s.rule;
       ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.moveTo(g.padX, y + 22); ctx.lineTo(g.W - g.padX, y + 22); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(g.padX, y + 24); ctx.lineTo(g.W - g.padX, y + 24); ctx.stroke();
       if (pageNo) {
-        label(ctx, pad2(pageNo), g.W - g.padX, y, { size: 20, color: s.sub, tracking: 0.12, weight: 700, align: 'right', maxW: 300 });
+        label(ctx, pad2(pageNo), g.W - g.padX, y, { size: 22, color: s.sub, tracking: 0.12, weight: 700, align: 'right', maxW: 300 });
       }
     }
   }
@@ -495,8 +495,8 @@
     ctx.strokeStyle = light ? 'rgba(255,255,255,.16)' : s.rule;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(g.padX, g.footY - 34); ctx.lineTo(g.W - g.padX, g.footY - 34); ctx.stroke();
-    if (handle) label(ctx, handle, g.padX, g.footY, { size: 20, color: c, tracking: 0.06, weight: 600, family: s.bodyFont, maxW: 600 });
-    if (pageNo) label(ctx, pad2(pageNo) + ' / ' + pad2(total), g.W - g.padX, g.footY, { size: 20, color: c, tracking: 0.1, weight: 700, align: 'right', maxW: 300, family: s.bodyFont });
+    if (handle) label(ctx, handle, g.padX, g.footY, { size: 23, color: c, tracking: 0.06, weight: 600, family: s.bodyFont, maxW: 600 });
+    if (pageNo) label(ctx, pad2(pageNo) + ' / ' + pad2(total), g.W - g.padX, g.footY, { size: 23, color: c, tracking: 0.08, weight: 700, align: 'right', maxW: 300, family: s.bodyFont });
   }
 
   /* ---------- 표지 ---------- */
@@ -565,7 +565,7 @@
 
     // 제목
     const maxW = W - pad * 2;
-    const titleSizeBase = (g.H > 1500 ? 128 : 114) * s.titleScale;
+    const titleSizeBase = (g.H > 1500 ? 132 : 118) * s.titleScale;
     let size = titleSizeBase;
     const titleText = card.title || '제목을 입력하세요';
     const maxTitleLines = g.H > 1500 ? 5 : 4;
@@ -574,18 +574,21 @@
       const spec = { family: s.titleFont, weight: s.titleWeight, size, tracking: s.tracking, lineHeight: 1.16 };
       lines = R.layout(titleText, maxW, spec);
       const hUsed = lines.length * size * 1.16;
-      if (lines.length <= maxTitleLines && hUsed <= (g.H > 1500 ? 780 : 560)) break;
+      if (lines.length <= maxTitleLines && hUsed <= (g.H > 1500 ? 820 : 580)) break;
     }
     const titleSpec = { family: s.titleFont, weight: s.titleWeight, size, tracking: s.tracking, lineHeight: 1.16 };
-    let titleTop;
-    if (s.cover === 'band' || s.cover === 'box') titleTop = 330;
-    else if (s.cover === 'frame') titleTop = (g.H > 1500 ? 640 : 470);
-    else titleTop = (g.H > 1500 ? 600 : 452);
+    const subSpec = { family: s.bodyFont, weight: 400, size: g.H > 1500 ? 34 : 31, tracking: 0, lineHeight: 1.6 };
+    const subLines = card.subtitle ? R.layout(card.subtitle, maxW * 0.94, subSpec).slice(0, 3) : [];
+    const blockH = lines.length * size * 1.16 + (subLines.length ? 46 + subLines.length * subSpec.size * 1.6 : 0);
+    const areaTop = (s.cover === 'band' || s.cover === 'box') ? 330 : 292;
+    const areaBottom = g.footY - 74;
+    let titleTop = Math.round((areaTop + areaBottom) / 2 - blockH / 2);
+    titleTop = Math.max(areaTop, Math.min(titleTop, areaBottom - blockH));
 
     // 제목 위 포인트
     if (s.cover === 'rule' || s.cover === 'ornament') {
       ctx.fillStyle = onPhoto ? 'rgba(255,255,255,.9)' : accent;
-      ctx.fillRect(pad, titleTop - 74, 46, 6);
+      ctx.fillRect(pad, titleTop - 66, 48, 6);
     }
     const firstBaseline = titleTop + size * 0.80;
     const afterTitle = drawLines(ctx, lines, {
@@ -594,12 +597,9 @@
     });
 
     // 부제
-    if (card.subtitle) {
-      const subSpec = { family: s.bodyFont, weight: 400, size: g.H > 1500 ? 32 : 30, tracking: 0, lineHeight: 1.62 };
-      const subLines = R.layout(card.subtitle, maxW * 0.94, subSpec);
-      const shown = subLines.slice(0, 3);
-      drawLines(ctx, shown, {
-        x: pad, y: afterTitle + (g.H > 1500 ? 58 : 48), maxW: maxW * 0.94, spec: subSpec,
+    if (subLines.length) {
+      drawLines(ctx, subLines, {
+        x: pad, y: afterTitle + 46, maxW: maxW * 0.94, spec: subSpec,
         color: subC, align: s.align === 'center' ? 'center' : 'left',
       });
     }
@@ -703,7 +703,7 @@
     const contentBottom = g.H - g.bot - 74;
     const totalH = (titleLines.length ? titleLines.length * ts.size * 1.2 + 26 : 0) + used;
     const free = (contentBottom - titleTop) - totalH;
-    const shift = free > 0 ? Math.min(free * 0.34, s.headerBand ? 130 : 170) : 0;
+    const shift = free > 0 ? Math.min(free * 0.22, 90) : 0;
     if (titleLines.length) {
       drawLines(ctx, titleLines, {
         x: box0.x, y: titleTop + shift + ts.size * 0.84, maxW: box0.w, spec: ts, color: ink,
@@ -750,10 +750,10 @@
     const top0 = titleTop + (titleLines.length ? titleLines.length * ts.size * 1.2 + 40 : 0) + 8;
     const bottom = g.H - g.bot - 90;
     const availH0 = bottom - top0;
-    const rowH = clamp(Math.floor(availH0 / rows.length), 46, 132);
-    const headH = Math.min(rowH, 84);
+    const rowH = clamp(Math.floor(availH0 / rows.length), 56, 168);
+    const headH = Math.min(rowH, 96);
     const tableH = headH + rowH * (rows.length - 1);
-    const top = top0 + Math.max(0, (availH0 - tableH) * 0.22);
+    const top = top0 + Math.max(0, (availH0 - tableH) * 0.15);
     const cellPad = 20;
     const colW = [];
     for (let c = 0; c < cols; c++) colW.push(1);
@@ -775,7 +775,7 @@
         ctx.fillStyle = isDark(s.bg && s.bg.color) ? 'rgba(255,255,255,.05)' : 'rgba(20,20,25,.035)';
         ctx.fillRect(g.padX, y, w, h);
       }
-      const cellSize = isHead ? 27 : (cols > 3 ? 25 : 29);
+      const cellSize = isHead ? 29 : (cols > 3 ? 26 : 31);
       const spec = { family: s.bodyFont, weight: isHead ? 800 : 500, size: cellSize, tracking: 0, lineHeight: 1.32 };
       let x = g.padX;
       for (let ci = 0; ci < cols; ci++) {
@@ -821,10 +821,10 @@
     const top = titleTop + (titleLines.length ? titleLines.length * ts.size * 1.2 + 42 : 0);
     const bottom = g.H - g.bot - 90;
     const few = items.length <= 4;
-    const box = few ? 40 : 34;
-    const rowH = clamp(Math.floor((bottom - top) / items.length), 62, few ? 168 : 124);
-    let y = top + Math.max(0, (bottom - top - rowH * items.length) / 2);
-    const spec = { family: s.bodyFont, weight: 500, size: few ? 36 : 30, tracking: 0, lineHeight: 1.36 };
+    const box = few ? 54 : 38;
+    const rowH = clamp(Math.floor((bottom - top) * (few ? 0.86 : 0.95) / items.length), 76, few ? 210 : 150);
+    let y = top + (few ? 18 : Math.max(0, (bottom - top - rowH * items.length) * 0.4));
+    const spec = { family: s.bodyFont, weight: 500, size: few ? 44 : 31, tracking: 0, lineHeight: 1.34 };
     for (const it of items) {
       const cy = y + rowH / 2;
       ctx.lineWidth = 2;
@@ -843,11 +843,11 @@
         roundRect(ctx, g.padX, cy - box / 2, box, box, 7);
         ctx.stroke();
       }
-      const lines = R.layout(it.text || '', w - box - 28, spec).slice(0, 2);
+      const lines = R.layout(it.text || '', w - box - 30, spec).slice(0, 2);
       const lh = spec.size * spec.lineHeight;
       const startY = cy - (lines.length * lh) / 2 + spec.size * 0.84;
       drawLines(ctx, lines, {
-        x: g.padX + box + 28, y: startY, maxW: w - box - 28, spec,
+        x: g.padX + box + 30, y: startY, maxW: w - box - 30, spec,
         color: it.done ? s.sub : s.body, align: 'left',
       });
       y += rowH;
@@ -877,21 +877,21 @@
 
     const cx = W / 2;
     const big = g.H > 1500;
-    const avatarR = big ? 96 : 86;
-    const nameSize = big ? 60 : 54;
+    const avatarR = big ? 112 : 104;
+    const nameSize = big ? 68 : 62;
     const nameSpec = { family: s.titleFont, weight: s.titleWeight, size: nameSize, tracking: -0.02, lineHeight: 1.2 };
-    const bioSpec = { family: s.bodyFont, weight: 400, size: 28, tracking: 0, lineHeight: 1.56 };
+    const bioSpec = { family: s.bodyFont, weight: 400, size: 31, tracking: 0, lineHeight: 1.56 };
     const bioLines = acct.bio ? R.layout(acct.bio, W - pad * 2 - 80, bioSpec).slice(0, 3) : [];
-    const noteSpec = { family: s.bodyFont, weight: 500, size: 23, tracking: 0, lineHeight: 1.5 };
+    const noteSpec = { family: s.bodyFont, weight: 500, size: 25, tracking: 0, lineHeight: 1.5 };
     const noteLines = R.layout(card.body || '저장해두면 나중에 다시 보기 좋아요', W - pad * 2 - 40, noteSpec).slice(0, 2);
-    const btnW = 320, btnH = 84;
+    const btnW = 348, btnH = 96;
 
-    const hAvatar = avatarR * 2 + (big ? 96 : 74);
-    const hName = nameSize * 1.2 + (big ? 28 : 20);
-    const hHandle = 28 * 1.3 + 26;
-    const hBio = bioLines.length ? bioLines.length * 28 * 1.56 + 36 : 0;
-    const hBtn = btnH + (big ? 72 : 56);
-    const hNote = noteLines.length * 23 * 1.5 + 20;
+    const hAvatar = avatarR * 2 + (big ? 104 : 82);
+    const hName = nameSize * 1.2 + (big ? 34 : 26);
+    const hHandle = 32 * 1.3 + 30;
+    const hBio = bioLines.length ? bioLines.length * 31 * 1.56 + 40 : 0;
+    const hBtn = btnH + (big ? 82 : 64);
+    const hNote = noteLines.length * 25 * 1.5 + 20;
     const totalH = hAvatar + hName + hHandle + hBio + hBtn + hNote;
     let cursor = Math.max(g.top + 6, (H - totalH) / 2 - (big ? 26 : 10));
     const avatarY = cursor + avatarR;
@@ -928,7 +928,7 @@
     });
     cursor += hName;
 
-    label(ctx, acct.handle || '@my_magazine', pad, cursor + 24, { size: 28, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
+    label(ctx, acct.handle || '@my_magazine', pad, cursor + 26, { size: 32, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
     cursor += hHandle;
 
     if (bioLines.length) {
@@ -943,10 +943,10 @@
     ctx.fillStyle = onPhoto ? '#fff' : s.accent;
     roundRect(ctx, cx - btnW / 2, by, btnW, btnH, btnH / 2);
     ctx.fill();
-    setFont(ctx, s.bodyFont, 800, 30);
+    setFont(ctx, s.bodyFont, 800, 34);
     ctx.fillStyle = isDark(s.accent) || onPhoto ? '#111111' : '#ffffff';
     ctx.textAlign = 'center';
-    ctx.fillText('팔로우  +', cx, by + btnH / 2 + 10);
+    ctx.fillText('팔로우  +', cx, by + btnH / 2 + 12);
     ctx.textAlign = 'left';
     cursor += hBtn;
 
