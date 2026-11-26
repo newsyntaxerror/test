@@ -1069,6 +1069,7 @@
         photoMode = false;
         closeSheet();
         buildTrack();
+        goTo(0, false);
         toast('처음 상태로 돌아갔어요');
       });
       renderMiniStrip();

@@ -1,5 +1,7 @@
-/* 에디토 service worker — 앱 껍데기만 캐시해서 홈 화면 앱처럼 빠르게 뜨게 합니다. */
-const CACHE = 'edito-shell-v1';
+/* 에디토 service worker
+   - 화면(HTML)·스크립트·스타일은 네트워크 우선: 새 버전이 바로 반영됩니다.
+   - 오프라인일 때만 캐시로 동작합니다. */
+const CACHE = 'edito-shell-v3';
 const SHELL = [
   './',
   './index.html',
@@ -35,27 +37,17 @@ self.addEventListener('fetch', (event) => {
   try { url = new URL(req.url); } catch (e) { return; }
   if (url.origin !== self.location.origin) return;
 
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).then((res) => {
+  event.respondWith(
+    fetch(req).then((res) => {
+      if (res && res.ok) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-        return res;
-      }).catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
-    );
-    return;
-  }
-
-  event.respondWith(
-    caches.match(req).then((hit) => {
-      const network = fetch(req).then((res) => {
-        if (res && res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-        }
-        return res;
-      }).catch(() => hit);
-      return hit || network;
-    })
+      }
+      return res;
+    }).catch(() => caches.match(req).then((hit) => {
+      if (hit) return hit;
+      if (req.mode === 'navigate') return caches.match('./index.html');
+      return new Response('', { status: 504, statusText: 'offline' });
+    }))
   );
 });
