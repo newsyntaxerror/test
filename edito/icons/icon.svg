@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="에디토">
+  <rect width="512" height="512" rx="112" fill="#101014"/>
+  <rect x="88" y="104" width="336" height="304" rx="20" fill="#f7f2e8"/>
+  <rect x="88" y="104" width="336" height="30" rx="14" fill="#ff5b3a"/>
+  <rect x="124" y="176" width="188" height="22" rx="6" fill="#17171b"/>
+  <rect x="124" y="218" width="264" height="10" rx="5" fill="#8d8983"/>
+  <rect x="124" y="242" width="240" height="10" rx="5" fill="#8d8983"/>
+  <rect x="124" y="266" width="150" height="10" rx="5" fill="#c9c3b9"/>
+  <rect x="124" y="326" width="60" height="8" rx="4" fill="#ff5b3a"/>
+  <rect x="124" y="352" width="264" height="8" rx="4" fill="#ded8cd"/>
+  <rect x="124" y="370" width="200" height="8" rx="4" fill="#ded8cd"/>
+</svg>
