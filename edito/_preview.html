@@ -13,6 +13,10 @@
 </head>
 <body>
 <div class="label">390 × 844 mobile preview</div>
-<div class="phone"><iframe src="./" title="에디토"></iframe></div>
+<div class="phone"><iframe id="f" src="./" title="에디토"></iframe></div>
+<script>
+  var v = new URLSearchParams(location.search).get('v');
+  if (v) document.getElementById('f').src = './?v=' + encodeURIComponent(v);
+</script>
 </body>
 </html>
