@@ -800,6 +800,12 @@
                 : '브라우저 직접 호출이 막히는 환경에서만 쓰세요.'}</span>
             </div>
           </details>
+          ${p.id === 'openai' ? `
+          <div class="field" style="background:var(--bg-2);border:1px dashed var(--line-2);border-radius:12px;padding:10px">
+            <label>GPT가 브라우저에서 막힐 때</label>
+            <span class="hint">OpenRouter(브라우저 호출 허용)를 거치면 프록시 서버 없이도 GPT를 쓸 수 있습니다. 키는 OpenRouter에서 발급한 sk-or-… 를 위 칸에 넣으세요.</span>
+            <button class="btn sm" data-act="use-openrouter" style="align-self:flex-start">OpenRouter로 설정</button>
+          </div>` : ''}
         </div>`;
       }).join('')}
       <div class="provider">
@@ -1269,6 +1275,16 @@
           target.type = show ? 'text' : 'password';
           el.style.color = show ? 'var(--brand)' : '';
         }
+        break;
+      }
+      case 'use-openrouter': {
+        const keys = { ...S.settings.keys };
+        const models = { ...S.settings.models, openai: 'openai/gpt-4o-mini' };
+        const proxy = { ...(S.settings.proxy || {}), openai: 'https://openrouter.ai/api' };
+        S.saveSettings({ keys, models, proxy });
+        const body = $('[data-pane-body="ai"]');
+        if (body) body.innerHTML = paneAI();
+        toast('OpenRouter로 바꿨습니다. OpenRouter 키(sk-or-…)를 넣고 테스트해 보세요.');
         break;
       }
       case 'test-key': {

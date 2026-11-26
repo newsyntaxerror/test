@@ -269,7 +269,7 @@
     if (err && err.name === 'AbortError') return '응답이 너무 늦어 취소했습니다(70초).';
     if (/Failed to fetch|NetworkError|Load failed|Network request failed/i.test(msg)) {
       return `${label}에 브라우저에서 직접 연결하지 못했습니다(CORS/네트워크). ${provider === 'openai'
-        ? 'OpenAI는 브라우저 직접 호출을 막는 경우가 있습니다. 설정에서 프록시 주소를 넣거나, 무료인 제미나이·클로드를 써 보세요.'
+        ? 'OpenAI는 브라우저 직접 호출을 막는 경우가 있습니다. 설정 → AI 연결에서 "OpenRouter로 설정"을 누르거나, 무료인 제미나이·클로드를 써 보세요.'
         : '설정에서 프록시 주소를 넣거나 잠시 뒤 다시 시도해 주세요.'}`;
     }
     return msg || 'AI 호출에 실패했습니다.';
