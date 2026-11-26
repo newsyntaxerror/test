@@ -139,7 +139,7 @@
       : memosMarkup();
 
     document.body.classList.remove('lock-scroll');
-    sizeRoom();
+    scheduleSize();
     paintChrome();
 
     const log = $('#chatLog');
@@ -196,16 +196,32 @@
     const grid = $('#roomGrid');
     if (!grid) { document.body.classList.remove('lock-scroll'); return; }
     const rect = grid.getBoundingClientRect();
+    const docTop = rect.top + window.scrollY;
     const appPad = parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom) || 0;
-    const avail = window.innerHeight - rect.top - appPad - 4;
+    const avail = window.innerHeight - docTop - appPad - 4;
     const fits = avail >= (isMobile() ? 430 : 470);
-    grid.style.height = Math.max(isMobile() ? 380 : 460, avail) + 'px';
+    grid.style.height = Math.max(isMobile() ? 360 : 460, avail) + 'px';
     document.body.classList.toggle('lock-scroll', fits);
   }
+
+  let sizeTimer = null;
+  let sizeRaf = 0;
+  function scheduleSize() {
+    cancelAnimationFrame(sizeRaf);
+    clearTimeout(sizeTimer);
+    sizeRaf = requestAnimationFrame(() => {
+      if (ui.tab !== 'room') return;
+      sizeRoom();
+      requestAnimationFrame(() => { if (ui.tab === 'room') sizeRoom(); });
+    });
+    sizeTimer = setTimeout(() => { if (ui.tab === 'room') sizeRoom(); }, 220);
+  }
   window.addEventListener('resize', () => {
-    if (ui.tab === 'room') sizeRoom();
+    if (ui.tab === 'room') scheduleSize();
   });
-  window.addEventListener('orientationchange', () => setTimeout(sizeRoom, 260));
+  window.addEventListener('orientationchange', () => setTimeout(scheduleSize, 260));
+  window.addEventListener('load', () => { if (ui.tab === 'room') scheduleSize(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (ui.tab === 'room') scheduleSize(); });
 
   /* ── 회의실 ─────────────────────────────────────────────── */
   function channelOf(id) {
@@ -334,7 +350,7 @@
               <button class="chip debate ${ui.debateMode ? 'is-on' : ''}" data-act="debate">💬 토론(2바퀴)</button>
             </div>
             <div class="composer">
-              <textarea id="composerInput" rows="1" placeholder="${ui.debateMode ? '토론 주제를 적고 보내면 2바퀴 토론이 시작돼요' : '지시를 한 줄로 (@전체 · @복님이 · @GPT …)'}" ${ui.busy ? 'disabled' : ''}>${esc(ui.draft)}</textarea>
+              <textarea id="composerInput" rows="1" placeholder="${ui.debateMode ? '토론 주제를 적고 보내면 2바퀴 토론이 시작돼요' : '지시를 입력 (@전체 · @GPT …)'}" ${ui.busy ? 'disabled' : ''}>${esc(ui.draft)}</textarea>
               <button class="send-btn" data-act="send" aria-label="보내기" ${ui.busy ? 'disabled' : ''}>${ICON.send}</button>
             </div>
             <div class="composer-note">🔒 대화는 ${S.sync.mode === 'live' ? '비서실 서버와 이 기기에' : '이 기기에만'} 저장됩니다${S.settings.simulate ? ' · 키 없는 비서는 시뮬레이션' : ''}</div>

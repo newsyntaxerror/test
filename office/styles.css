@@ -296,7 +296,7 @@ svg { display: block; }
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr);
   gap: 16px;
-  min-height: 480px;
+  min-height: 0;
 }
 
 .rail {
@@ -395,7 +395,8 @@ svg { display: block; }
   background: var(--card-3); font-size: 18px;
 }
 .chat-head h3 { font-size: 15px; font-weight: 800; letter-spacing: -.02em; display: flex; align-items: center; gap: 6px; }
-.chat-head p { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.chat-head > div { min-width: 0; }
+.chat-head p { font-size: 11.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-head .who { margin-left: auto; display: flex; align-items: center; }
 .chat-head .who .mini {
   width: 26px; height: 26px; border-radius: 50%;
@@ -1240,6 +1241,18 @@ svg { display: block; }
 
 @media (min-width: 900px) {
   .sheet-content { padding: 20px 22px; }
+}
+
+@media (max-width: 380px) {
+  .brand-text p { display: none; }
+  .brand-text h1 { font-size: 15px; }
+  .brand-mark { width: 32px; height: 32px; border-radius: 10px; }
+  .conn-badge { padding: 0 8px; font-size: 10px; }
+  .icon-btn { width: 32px; height: 32px; }
+  .tab { height: 46px; font-size: 9.5px; }
+  .chat-head p { display: none; }
+  .composer-note { display: none; }
+  .chip { font-size: 11.5px; padding: 0 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
