@@ -257,8 +257,17 @@
 
       const num = t.match(/^(\d{1,2})[.)]\s+(.{1,40})$/);
       if (num && !/[.!?。]$/.test(t)) {
-        // 바로 뒤에 이어지는 번호가 있으면 제목이 아니라 목록으로 봅니다 (1. 2. 3.)
+        // 앞뒤로 이어지는 번호가 있으면 제목이 아니라 목록으로 봅니다 (1. 2. 3.)
         let isList = false;
+        let prevNum = null;
+        for (let k = i - 1; k >= 0 && k >= i - 2; k--) {
+          const pt = lines[k].trim();
+          if (!pt) continue;
+          const pm = pt.match(/^(\d{1,2})[.)]\s+/);
+          if (pm) prevNum = Number(pm[1]);
+          break;
+        }
+        if (prevNum !== null && Number(num[1]) === prevNum + 1) isList = true;
         for (let k = i + 1; k < Math.min(lines.length, i + 3); k++) {
           const nt = lines[k].trim();
           if (!nt) continue;
