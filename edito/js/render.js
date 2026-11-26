@@ -428,7 +428,7 @@
     const labelH = s.headerBand ? 176 : 92;
     const ts = R.titleSpec(s, ratio);
     let top = g.top + labelH;
-    if (titleLines) top += Math.round(titleLines * ts.size * 1.2 + 26);
+    if (titleLines) top += Math.round(titleLines * ts.size * 1.2 + 34);
     const bottom = g.H - g.bot - 74;
     return { x: g.padX, y: top, w: g.W - 2 * g.padX, h: Math.max(80, bottom - top) };
   };
@@ -457,7 +457,7 @@
   /* ---------- 공통 크롬 ---------- */
   function chapterTag(ctx, card, s, g, pageNo, total) {
     const text = card.label || 'PART 01';
-    const y = g.top + (s.headerBand ? 96 : 30);
+    const y = s.headerBand ? 112 : g.top + 30;
     const light = isDark(s.bg && s.bg.color);
     if (s.headerBand) {
       label(ctx, text, g.padX, y, { size: 22, color: 'rgba(255,255,255,.82)', tracking: 0.22, weight: 800, family: s.bodyFont });
@@ -524,6 +524,10 @@
           ctx.fillRect(band.x, band.y, band.w, band.h);
         }
         // 아래쪽 어둡게 (텍스트 가독성)
+        const topScrim = ctx.createLinearGradient(0, 0, 0, H * 0.24);
+        topScrim.addColorStop(0, 'rgba(0,0,0,.42)');
+        topScrim.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = topScrim; ctx.fillRect(0, 0, W, H * 0.28);
         const grd2 = ctx.createLinearGradient(0, H * 0.45, 0, H);
         grd2.addColorStop(0, 'rgba(0,0,0,0)');
         grd2.addColorStop(1, 'rgba(0,0,0,' + (band.h === H ? 0.18 : 0.42) + ')');
@@ -701,7 +705,7 @@
 
     // 짧은 카드는 글이 위에 몰리지 않도록 살짝 아래로 균형을 잡습니다
     const contentBottom = g.H - g.bot - 74;
-    const totalH = (titleLines.length ? titleLines.length * ts.size * 1.2 + 26 : 0) + used;
+    const totalH = (titleLines.length ? titleLines.length * ts.size * 1.2 + 34 : 0) + used;
     const free = (contentBottom - titleTop) - totalH;
     const shift = free > 0 ? Math.min(free * 0.3, 160) : 0;
     if (titleLines.length) {
