@@ -361,7 +361,7 @@
       </div>
       <div class="block">
         <div class="block-title">마지막 장</div>
-        <div class="checkline"><span>프로필 · 팔로우 카드 넣기</span><span class="switch ${state.addCTA ? 'on' : ''}" data-act="cta"></span></div>
+        <div class="checkline"><span>프로필 · 팔로우 카드 넣기</span><span class="switch ${state.addCTA ? 'on' : ''}" role="switch" aria-label="마지막 장 프로필 카드" tabindex="0" data-act="cta"></span></div>
       </div>`;
     },
     bind(body) {
@@ -743,7 +743,7 @@
         <div class="block-title">내용</div>
         <input class="field" id="cardTitle" placeholder="제목" value="${esc(card.title || '')}" ${card.type === 'end' ? 'style="display:none"' : ''}>
         ${card.type === 'cover' ? `<input class="field" id="cardSub" placeholder="부제" value="${esc(card.subtitle || '')}" style="margin-top:8px">` : ''}
-        ${card.type === 'end' ? `<textarea class="field" id="cardBody" rows="3" placeholder="마지막 한마디">${esc(card.body || '')}</textarea>` : `<div style="margin-top:8px">${content}</div>`}
+        ${card.type === 'cover' ? '' : card.type === 'end' ? `<textarea class="field" id="cardBody" rows="3" placeholder="마지막 한마디">${esc(card.body || '')}</textarea>` : `<div style="margin-top:8px">${content}</div>`}
       </div>
 
       <div class="block">
@@ -762,7 +762,7 @@
           ${slider('zoom', '확대', 1, 2.4, 0.02, card.photo.zoom || 1, (v) => v.toFixed(2) + '×')}
           ${slider('brightness', '밝기', -0.5, 0.5, 0.02, card.photo.brightness || 0, (v) => (v > 0 ? '+' : '') + Math.round(v * 100))}
           ${slider('dark', '어둡게', 0, 0.8, 0.02, card.photo.dark == null ? 0.3 : card.photo.dark, (v) => Math.round(v * 100))}
-          <div class="checkline"><span>사진 위치 조정</span><span class="switch ${photoMode ? 'on' : ''}" data-act="photomode"></span></div>
+          <div class="checkline"><span>사진 위치 조정</span><span class="switch ${photoMode ? 'on' : ''}" role="switch" aria-label="사진 위치 조정" tabindex="0" data-act="photomode"></span></div>
           <p class="hint">켜두면 카드 위를 끌어서 사진을 움직일 수 있어요.</p>
         ` : '<p class="hint">카드 한 장에 사진 한 장을 넣을 수 있어요. 세로 사진이 가장 예뻐요.</p>'}
       </div>
@@ -928,7 +928,7 @@
       return `
       <div class="block" style="padding-top:0">
         <div class="block-title">표지 점검</div>
-        <div class="checkline"><span>인스타 그리드 1:1 잘림 가이드</span><span class="switch ${coverGuideOn ? 'on' : ''}" data-act="guide"></span></div>
+        <div class="checkline"><span>인스타 그리드 1:1 잘림 가이드</span><span class="switch ${coverGuideOn ? 'on' : ''}" role="switch" aria-label="표지 잘림 가이드" tabindex="0" data-act="guide"></span></div>
         <p class="hint">표지에서 위아래로 잘리는 영역을 어둡게 보여줘요. 제목이 가운데 정사각형 안에 들어오면 프로필 그리드에서도 잘 보입니다.</p>
       </div>
       <div class="block">

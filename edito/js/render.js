@@ -419,7 +419,7 @@
     };
   };
   R.titleSpec = function (s, ratio) {
-    const base = ratio === '9:16' ? 70 : 66;
+    const base = ratio === '9:16' ? 78 : 72;
     return { family: s.titleFont, weight: s.titleWeight, size: Math.round(base * s.titleScale), tracking: s.tracking, lineHeight: 1.2 };
   };
 
@@ -552,11 +552,11 @@
       label(ctx, (card.kicker || '오늘의 카드뉴스'), pad, 150, { size: 34, color: '#fff', tracking: -0.01, weight: 800, family: s.bodyFont, maxW: W - pad * 2 });
     } else {
       const kicker = card.kicker || (acct && acct.handle) || 'MAGAZINE';
-      label(ctx, kicker, pad, g.top + 16, { size: 22, color: onPhoto ? 'rgba(255,255,255,.85)' : accent, tracking: 0.16, weight: 700, family: s.bodyFont, maxW: W - pad * 2 });
+      label(ctx, kicker, pad, g.top + 14, { size: 22, color: onPhoto ? 'rgba(255,255,255,.85)' : accent, tracking: 0.16, weight: 700, family: s.bodyFont, maxW: W - pad * 2 });
       if (s.cover === 'rule') {
         ctx.strokeStyle = onPhoto ? 'rgba(255,255,255,.32)' : s.rule;
         ctx.lineWidth = 1.4;
-        ctx.beginPath(); ctx.moveTo(pad, g.top + 44); ctx.lineTo(W - pad, g.top + 44); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, g.top + 54); ctx.lineTo(W - pad, g.top + 54); ctx.stroke();
       } else if (s.cover === 'bar') {
         ctx.fillStyle = accent;
         ctx.fillRect(pad - 30, g.top + 8, 8, 40);
@@ -592,7 +592,7 @@
     }
     const firstBaseline = titleTop + size * 0.80;
     const afterTitle = drawLines(ctx, lines, {
-      x: pad, y: firstBaseline, maxW, spec: titleSpec, color: ink, align: s.align === 'center' ? 'center' : 'left',
+      x: pad, y: firstBaseline, maxW, spec: titleSpec, color: ink, align: s.align || 'left',
       highlight: null, boldColor: ink,
     });
 
@@ -600,7 +600,7 @@
     if (subLines.length) {
       drawLines(ctx, subLines, {
         x: pad, y: afterTitle + 46, maxW: maxW * 0.94, spec: subSpec,
-        color: subC, align: s.align === 'center' ? 'center' : 'left',
+        color: subC, align: s.align || 'left',
       });
     }
 
@@ -703,7 +703,7 @@
     const contentBottom = g.H - g.bot - 74;
     const totalH = (titleLines.length ? titleLines.length * ts.size * 1.2 + 26 : 0) + used;
     const free = (contentBottom - titleTop) - totalH;
-    const shift = free > 0 ? Math.min(free * 0.22, 90) : 0;
+    const shift = free > 0 ? Math.min(free * 0.3, 160) : 0;
     if (titleLines.length) {
       drawLines(ctx, titleLines, {
         x: box0.x, y: titleTop + shift + ts.size * 0.84, maxW: box0.w, spec: ts, color: ink,
@@ -821,10 +821,10 @@
     const top = titleTop + (titleLines.length ? titleLines.length * ts.size * 1.2 + 42 : 0);
     const bottom = g.H - g.bot - 90;
     const few = items.length <= 4;
-    const box = few ? 54 : 38;
-    const rowH = clamp(Math.floor((bottom - top) * (few ? 0.86 : 0.95) / items.length), 76, few ? 210 : 150);
+    const box = few ? 58 : 38;
+    const rowH = clamp(Math.floor((bottom - top) * (few ? 0.88 : 0.95) / items.length), 78, few ? 220 : 150);
     let y = top + (few ? 18 : Math.max(0, (bottom - top - rowH * items.length) * 0.4));
-    const spec = { family: s.bodyFont, weight: 500, size: few ? 44 : 31, tracking: 0, lineHeight: 1.34 };
+    const spec = { family: s.bodyFont, weight: 500, size: few ? 47 : 31, tracking: 0, lineHeight: 1.34 };
     for (const it of items) {
       const cy = y + rowH / 2;
       ctx.lineWidth = 2;
@@ -876,22 +876,23 @@
     }
 
     const cx = W / 2;
+    label(ctx, 'THANK YOU', pad, g.top + 24, { size: 22, color: s.accent, tracking: 0.3, weight: 800, align: 'center', maxW: W - pad * 2 });
     const big = g.H > 1500;
-    const avatarR = big ? 112 : 104;
-    const nameSize = big ? 68 : 62;
+    const avatarR = big ? 128 : 104;
+    const nameSize = big ? 80 : 62;
     const nameSpec = { family: s.titleFont, weight: s.titleWeight, size: nameSize, tracking: -0.02, lineHeight: 1.2 };
-    const bioSpec = { family: s.bodyFont, weight: 400, size: 31, tracking: 0, lineHeight: 1.56 };
+    const bioSpec = { family: s.bodyFont, weight: 400, size: big ? 34 : 31, tracking: 0, lineHeight: 1.56 };
     const bioLines = acct.bio ? R.layout(acct.bio, W - pad * 2 - 80, bioSpec).slice(0, 3) : [];
-    const noteSpec = { family: s.bodyFont, weight: 500, size: 25, tracking: 0, lineHeight: 1.5 };
+    const noteSpec = { family: s.bodyFont, weight: 500, size: big ? 29 : 25, tracking: 0, lineHeight: 1.5 };
     const noteLines = R.layout(card.body || '저장해두면 나중에 다시 보기 좋아요', W - pad * 2 - 40, noteSpec).slice(0, 2);
-    const btnW = 348, btnH = 96;
+    const btnW = big ? 400 : 348, btnH = big ? 112 : 96;
 
-    const hAvatar = avatarR * 2 + (big ? 104 : 82);
-    const hName = nameSize * 1.2 + (big ? 34 : 26);
-    const hHandle = 32 * 1.3 + 30;
-    const hBio = bioLines.length ? bioLines.length * 31 * 1.56 + 40 : 0;
-    const hBtn = btnH + (big ? 82 : 64);
-    const hNote = noteLines.length * 25 * 1.5 + 20;
+    const hAvatar = avatarR * 2 + (big ? 120 : 82);
+    const hName = nameSize * 1.2 + (big ? 40 : 26);
+    const hHandle = (big ? 38 : 32) * 1.3 + 32;
+    const hBio = bioLines.length ? bioLines.length * bioSpec.size * 1.56 + 44 : 0;
+    const hBtn = btnH + (big ? 90 : 64);
+    const hNote = noteLines.length * noteSpec.size * 1.5 + 20;
     const totalH = hAvatar + hName + hHandle + hBio + hBtn + hNote;
     let cursor = Math.max(g.top + 6, (H - totalH) / 2 - (big ? 26 : 10));
     const avatarY = cursor + avatarR;
@@ -928,7 +929,7 @@
     });
     cursor += hName;
 
-    label(ctx, acct.handle || '@my_magazine', pad, cursor + 26, { size: 32, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
+    label(ctx, acct.handle || '@my_magazine', pad, cursor + 26, { size: big ? 38 : 32, color: s.accent, tracking: 0.04, weight: 700, align: 'center', maxW: W - pad * 2, family: s.bodyFont });
     cursor += hHandle;
 
     if (bioLines.length) {
@@ -943,7 +944,7 @@
     ctx.fillStyle = onPhoto ? '#fff' : s.accent;
     roundRect(ctx, cx - btnW / 2, by, btnW, btnH, btnH / 2);
     ctx.fill();
-    setFont(ctx, s.bodyFont, 800, 34);
+    setFont(ctx, s.bodyFont, 800, big ? 38 : 34);
     ctx.fillStyle = isDark(s.accent) || onPhoto ? '#111111' : '#ffffff';
     ctx.textAlign = 'center';
     ctx.fillText('팔로우  +', cx, by + btnH / 2 + 12);
