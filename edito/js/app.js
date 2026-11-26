@@ -1482,4 +1482,11 @@
   }
 
   boot();
+
+  /* 개발용 상태 훅 (최종 배포 전 제거) */
+  window.__edito = {
+    get state() { return state; },
+    rebuild: rebuild,
+    goTo: goTo,
+  };
 })();
