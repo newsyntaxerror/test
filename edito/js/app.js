@@ -136,7 +136,15 @@
     state.cards.forEach((card, i) => { if (cans[i]) paintCard(cans[i], card); });
     updateBadges();
     updateMiniStrip();
+    updateSheetPreview();
     updateGuide();
+  }
+
+  function updateSheetPreview() {
+    const pv = document.querySelector('#sheetBody [data-preview]');
+    const card = activeCard();
+    if (!pv || !card) return;
+    try { R.paint(pv, card, state, 0.32); } catch (e) { /* noop */ }
   }
   const renderSoon = raf(renderAll);
 
@@ -423,6 +431,10 @@
     updateMeter();
   }
 
+    function previewHtml() {
+      return `<div class="mini-preview"><canvas data-preview aria-label="현재 카드 미리보기"></canvas></div>`;
+    }
+
   /* =========================================================
      시트 · 디자인
   ========================================================= */
@@ -473,11 +485,16 @@
         </div>`).join('');
 
       return `
-      <div class="block">
+      <div class="block" style="padding-top:0">
         <div class="block-title">비율</div>
-        <div class="segmented" data-seg="ratio">
-          <button data-v="4:5" class="${state.ratio === '4:5' ? 'on' : ''}">4:5 피드</button>
-          <button data-v="9:16" class="${state.ratio === '9:16' ? 'on' : ''}">9:16 릴스·스토리</button>
+        <div class="card-head-row">
+          <div class="card-head-tools">
+            <div class="segmented" data-seg="ratio">
+              <button data-v="4:5" class="${state.ratio === '4:5' ? 'on' : ''}">4:5 피드</button>
+              <button data-v="9:16" class="${state.ratio === '9:16' ? 'on' : ''}">9:16 릴스·스토리</button>
+            </div>
+          </div>
+          ${previewHtml()}
         </div>
       </div>
 
@@ -538,6 +555,7 @@
     },
 
     bind(body) {
+      updateSheetPreview();
       body.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
         state.templateId = b.dataset.tpl;
         state.fontId = null;
@@ -750,11 +768,16 @@
       return `
       <div class="block" style="padding-top:0">
         <div class="block-title">카드 <small>${idx + 1} / ${total}</small></div>
-        <div class="btn-row">
-          <button class="btn" data-act="prev" type="button" ${idx === 0 ? 'disabled' : ''}>← 이전</button>
-          <button class="btn" data-act="next" type="button" ${idx >= total - 1 ? 'disabled' : ''}>다음 →</button>
+        <div class="card-head-row">
+          <div class="card-head-tools">
+            <div class="btn-row">
+              <button class="btn" data-act="prev" type="button" ${idx === 0 ? 'disabled' : ''}>← 이전</button>
+              <button class="btn" data-act="next" type="button" ${idx >= total - 1 ? 'disabled' : ''}>다음 →</button>
+            </div>
+            <div class="segmented" style="margin-top:10px" data-seg="ctype">${types}</div>
+          </div>
+          ${previewHtml()}
         </div>
-        <div class="segmented" style="margin-top:10px" data-seg="ctype">${types}</div>
       </div>
 
       <div class="block">
@@ -814,6 +837,7 @@
     bind(body) {
       const card = activeCard();
       if (!card) return;
+      updateSheetPreview();
       const touch = () => { renderSoon(); save(); };
 
       const titleEl = body.querySelector('#cardTitle');

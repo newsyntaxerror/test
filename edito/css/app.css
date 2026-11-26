@@ -447,6 +447,18 @@ input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius
 .swatch.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--ink); }
 .swatch.auto { display: grid; place-items: center; font-size: 9px; font-weight: 800; color: var(--ink-2); background: var(--panel-2); }
 
+.card-head-row { display: flex; align-items: flex-start; gap: 12px; }
+.card-head-tools { flex: 1 1 auto; min-width: 0; }
+.mini-preview {
+  flex: 0 0 78px;
+  width: 78px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.12);
+}
+.mini-preview canvas { display: block; width: 100%; height: auto; }
+
 .card-strip { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; scrollbar-width: none; }
 .card-strip::-webkit-scrollbar { display: none; }
 .mini {
