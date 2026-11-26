@@ -164,7 +164,7 @@
 
   function showEmpty(on) {
     $('empty').hidden = !on;
-    $('tabbar').style.opacity = on ? '.999' : '';
+    $('meter').style.visibility = on ? 'hidden' : '';
   }
 
   /* =========================================================
