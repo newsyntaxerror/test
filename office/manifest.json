@@ -1,0 +1,55 @@
+{
+  "name": "달콩 비서실",
+  "short_name": "비서실",
+  "description": "달콩 님의 개인 AI 멀티 비서실 — 회의실 · 작업실 · 비서현황 · 메모",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "id": "/test/office/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#FBF7F0",
+  "theme_color": "#FBF7F0",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "회의실",
+      "url": "./?tab=room"
+    },
+    {
+      "name": "작업실",
+      "url": "./?tab=tasks"
+    },
+    {
+      "name": "메모",
+      "url": "./?tab=memos"
+    }
+  ]
+}
