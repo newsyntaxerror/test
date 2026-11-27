@@ -211,6 +211,131 @@ function applyColorFx(c, el, box, sx, sy, sw, sh, gx, gy, mode) {
   c.restore();
 }
 
+// ── 🪩 싸이키 조명 — 박자마다 클럽 컬러 스포트라이트가 교차 ────────────
+const PSY_COLORS = ['#FF2A85', '#00F5D4', '#8B5CF6', '#FFE600'];
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+function hexRgb(hex) {
+  const h = String(hex || '#FF2A85').replace('#', '');
+  const v = h.length === 3 ? h.split('').map((x) => x + x).join('') : h;
+  const n = parseInt(v, 16) || 0;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function withAlpha(hex, a) {
+  const [r, g, b] = hexRgb(hex);
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
+}
+
+// 영상 영역 안에서만 그린다. screen/overlay 합성만 써서 아이 얼굴을 가리지 않고 색만 얹는다.
+function drawPsyLighting(c, box, S) {
+  const lv = S.psy || 0;              // 0 끔 · 1 약 · 2 강
+  if (!lv || !box || !(box.w > 0) || !(box.h > 0)) return;
+  const t = S.t || 0;
+  const beat = Math.max(0.14, S.beat || 0.43);
+  const env = Math.max(0, Math.min(1, S.env || 0));
+  const strong = lv >= 2;
+  const pos = t / beat;
+  const bi = Math.floor(pos);
+  const ph = pos - bi;                // 한 박 안에서의 위치 0..1
+  const A = PSY_COLORS[((bi % 4) + 4) % 4];                 // 이번 박의 주조색
+  const B = PSY_COLORS[(((bi + 1) % 4) + 4) % 4];           // 다음 박의 색(박 끝에서 교차)
+  const mixT = clamp01((ph - 0.62) / 0.38);                 // 박 뒤쪽 38%에서 다음 색으로 넘어감
+  const pulse = 0.62 + 0.38 * env;    // 박자마다 밝아짐
+  const k = strong ? 1 : 0.55;        // 강/약 배율
+
+  c.save();
+  c.beginPath();
+  c.rect(box.x, box.y, box.w, box.h);
+  c.clip();
+
+  // 1) 컬러 틴트 — 밝기(luminance)는 그대로 두고 색상만 옅게 입힌다(얼굴이 하얗게 타지 않음)
+  c.globalCompositeOperation = 'color';
+  c.globalAlpha = (strong ? 0.20 : 0.15) * pulse;
+  c.fillStyle = A;
+  c.fillRect(box.x, box.y, box.w, box.h);
+  if (mixT > 0.001) {
+    c.globalAlpha = (strong ? 0.18 : 0.13) * pulse * mixT;
+    c.fillStyle = B;
+    c.fillRect(box.x, box.y, box.w, box.h);
+  }
+
+  // 2) 화면 전체를 적시는 클럽 컬러 워시
+  const wash = c.createLinearGradient(box.x, box.y, box.x + box.w * 0.4, box.y + box.h);
+  wash.addColorStop(0, withAlpha(A, (strong ? 0.09 : 0.07) * pulse));
+  wash.addColorStop(0.6, withAlpha(A, (strong ? 0.05 : 0.04) * pulse));
+  wash.addColorStop(1, withAlpha(B, (strong ? 0.08 : 0.06) * pulse * mixT));
+  c.globalCompositeOperation = 'screen';
+  c.globalAlpha = 1;
+  c.fillStyle = wash;
+  c.fillRect(box.x, box.y, box.w, box.h);
+
+  // 3) 스포트라이트 — 테두리 쪽에서 돌며 번쩍이는 클럽 조명(얼굴 가운데는 비켜 감)
+  const spots = strong ? 4 : 3;
+  for (let i = 0; i < spots; i++) {
+    const col = (i % 2 === 0) ? A : B;
+    const ang = t * (0.9 + i * 0.17) + (i * Math.PI * 2) / spots;
+    const edge = 0.40 + 0.06 * Math.sin(ang * 0.7 + i);
+    const cx = box.x + box.w * (0.5 + edge * Math.cos(ang));
+    const cy = box.y + box.h * (0.5 + (edge + 0.03) * Math.sin(ang * 1.07 + i * 1.3));
+    const rad = Math.min(box.w, box.h) * (strong ? 0.36 : 0.34) * (0.92 + 0.14 * Math.sin(ang * 0.8));
+    const g = c.createRadialGradient(cx, cy, 0, cx, cy, rad);
+    const a0 = (strong ? 0.85 : 0.58) * pulse * (i === 0 ? 1 : 0.85);
+    g.addColorStop(0, withAlpha(col, a0));
+    g.addColorStop(0.2, withAlpha(col, a0 * 0.52));
+    g.addColorStop(0.55, withAlpha(col, a0 * 0.14));
+    g.addColorStop(1, withAlpha(col, 0));
+    c.fillStyle = g;
+    c.fillRect(box.x, box.y, box.w, box.h);
+  }
+
+  // 3-2) 빛 자체가 번쩍이는 광량(color-dodge) — 스포트라이트 코어를 밝게
+  if (typeof c.globalCompositeOperation === 'string') {
+    for (let i = 0; i < 2; i++) {
+      const ang = t * (0.62 + i * 0.19) + i * 2.9;
+      const cx = box.x + box.w * (0.5 + 0.38 * Math.cos(ang));
+      const cy = box.y + box.h * (0.42 + 0.30 * Math.sin(ang * 1.11 + i));
+      const rad = Math.min(box.w, box.h) * (strong ? 0.30 : 0.28);
+      const g = c.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      const a0 = (strong ? 0.34 : 0.23) * pulse;
+      g.addColorStop(0, withAlpha(i ? B : A, a0));
+      g.addColorStop(0.35, withAlpha(i ? B : A, a0 * 0.35));
+      g.addColorStop(1, withAlpha(i ? B : A, 0));
+      c.globalCompositeOperation = 'color-dodge';
+      c.fillStyle = g;
+      c.fillRect(box.x, box.y, box.w, box.h);
+    }
+  }
+
+  // 4) 강: 화면을 쓸고 도는 가느다란 빛줄기
+  if (strong && typeof c.createConicGradient === 'function') {
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h * 0.46;
+    const cg = c.createConicGradient(t * 1.15, cx, cy);
+    const beams = 8;
+    for (let j = 0; j < beams; j++) {
+      const col = j % 4 === 3 ? B : A;
+      cg.addColorStop(j / beams, withAlpha(col, 0));
+      cg.addColorStop((j + 0.5) / beams, withAlpha(col, 0.10 * pulse));
+    }
+    c.fillStyle = cg;
+    c.fillRect(box.x, box.y, box.w, box.h);
+  }
+
+  // 5) 박마다 가장자리로 퍼지는 컬러 글로우
+  if (env > 0.02) {
+    const g2 = c.createRadialGradient(
+      box.x + box.w / 2, box.y + box.h * 0.5, Math.min(box.w, box.h) * 0.22,
+      box.x + box.w / 2, box.y + box.h * 0.5, Math.max(box.w, box.h) * 0.8,
+    );
+    g2.addColorStop(0, withAlpha(A, 0));
+    g2.addColorStop(1, withAlpha(B, (strong ? 0.34 : 0.20) * env));
+    c.fillStyle = g2;
+    c.fillRect(box.x, box.y, box.w, box.h);
+  }
+  c.restore();
+}
+
 function drawBadge(c, fmt, lay, env, pulseOn) {
   const b = fmt.badge || {};
   if (!b.show) return;
@@ -284,8 +409,25 @@ export function drawScene(c, S) {
     c.fillStyle = g; c.fillRect(0, 0, W, H);
   }
 
+  // 싸이키 조명의 배경 번짐 (영상 뒤쪽 테두리로 새어 나오는 빛)
+  if (S.psy && dark) {
+    const beatSec = Math.max(0.14, S.beat || 0.43);
+    const col = PSY_COLORS[Math.floor(Math.max(0, t) / beatSec) % 4];
+    const g = c.createRadialGradient(W / 2, H * 0.5, W * 0.18, W / 2, H * 0.5, W * 0.92);
+    g.addColorStop(0, withAlpha(col, 0));
+    g.addColorStop(1, withAlpha(col, (S.psy >= 2 ? 0.12 : 0.09) * (0.45 + 0.55 * env)));
+    c.save();
+    c.globalCompositeOperation = 'screen';
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    c.restore();
+  }
+
   // 영상
   drawVideoCover(c, S.video, lay.video, zoomShake, S.fitY == null ? 0.42 : S.fitY, lay.radius, { dx: shx, dy: shy, color: S.colorFx });
+
+  // 🪩 싸이키 조명 (영상 영역 안에서 은은~화려하게)
+  if (S.psy) drawPsyLighting(c, lay.video, S);
 
   // 모서리·테두리 비트 반응
   if (S.edgeOn && lay.video.w > 0) {

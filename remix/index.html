@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css?v=1.2.0">
+<link rel="stylesheet" href="css/app.css?v=1.3.0">
 </head>
 <body>
 <div class="app">
@@ -215,7 +215,7 @@
       </div>
 
       <div id="fxAutoBlock">
-        <p class="hint" id="fxAutoHint">선택한 장르·BPM에 맞춰 <b>줌 펀치·비트 플래시·컷 전환·색감</b>을 가장 자연스러운 값으로 자동 세팅해요.</p>
+        <p class="hint" id="fxAutoHint">선택한 장르·BPM에 맞춰 <b>줌 펀치·비트 플래시·컷 전환·색감·🪩 싸이키 조명</b>을 가장 자연스러운 값으로 자동 세팅해요.</p>
         <div class="fxsummary" id="fxSummary"></div>
         <button id="btnFxAuto" class="primary wide" style="margin-top:8px">✨ 지금 설정 그대로 적용</button>
       </div>
@@ -244,6 +244,13 @@
             <option value="2">강</option>
           </select>
         </label>
+        <label class="selrow"><span>🪩 싸이키 조명</span>
+          <select id="fxPsy">
+            <option value="0">끔</option>
+            <option value="1" selected>약</option>
+            <option value="2">강</option>
+          </select>
+        </label>
         <label class="selrow"><span>색감 필터</span>
           <select id="fxColor">
             <option value="none">원본</option>
@@ -257,6 +264,7 @@
           <span><b>모서리·테두리 비트 반응</b><em>박자에 맞춰 테두리가 빛나요</em></span>
           <input type="checkbox" id="fxEdge" checked>
         </label>
+        <p class="hint">🪩 <b>싸이키 조명</b>은 박자마다 핑크·시안·바이올렛·네온옐로우 조명이 교차하며 번쩍이는 클럽 조명이에요. 얼굴을 가리지 않게 <b>약</b>부터 확인해 보세요.</p>
         <p class="hint">효과는 <b>미리보기와 저장 영상 모두</b> 똑같이 들어가요. 먼저 <b>▶ 미리보기</b>로 확인해 보세요.</p>
       </div>
     </section>
@@ -323,7 +331,7 @@
         <p class="hint" id="saveHint" hidden>아이폰은 <b>📱 사진첩에 저장</b>을 누른 뒤 공유 시트에서 <b>'비디오 저장'</b>을 고르면 사진첩(앨범)에 바로 저장돼요.</p>
         <canvas id="thumb" class="thumb" hidden></canvas>
       </div>
-      <p class="hint">영상은 실시간으로 렌더링돼요(길이만큼 걸립니다). MP4를 지원하지 않는 브라우저는 WebM으로 저장되고, 오디오는 WAV로도 받을 수 있어요.</p>
+      <p class="hint">영상은 <b>30fps 고정</b>으로 한 장씩 인코딩해요(길이의 1~3배 정도 걸립니다). 슬라이드처럼 끊기지 않고 사진첩에서도 부드럽게 재생돼요. 오디오는 WAV로도 받을 수 있어요.</p>
     </section>
 
     <details class="help card">
@@ -339,10 +347,10 @@
 
   <footer class="foot">
     <span>다인이네 · 리믹스 스튜디오</span>
-    <span id="verLabel">v1.2</span>
+    <span id="verLabel">v1.3</span>
   </footer>
 </div>
 <div id="toast" class="toast" hidden></div>
-<script type="module" src="js/app.js?v=1.2.0"></script>
+<script type="module" src="js/app.js?v=1.3.0"></script>
 </body>
 </html>

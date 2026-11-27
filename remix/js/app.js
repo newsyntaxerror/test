@@ -1,5 +1,6 @@
 // 다인이 리믹스 스튜디오 — 앱 로직
 import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js';
+import { encodeMp4, webCodecsSupported } from './encode.js';
 import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.2.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
@@ -30,7 +31,7 @@ const S = {
   fitMode: 'smooth',    // smooth = 1배속 부드럽게(기본) · beatcut = 비트 점프컷
   renderRes: null,      // '720' | '1080' — 모바일 기본은 720p
   fxMode: 'auto',       // auto = 알아서 편집 · manual = 직접 편집
-  fx: { shake: 1, color: 'vivid', edge: true },
+  fx: { shake: 1, color: 'vivid', edge: true, psy: 1 },   // psy = 🪩 싸이키 조명 (0 끔 · 1 약 · 2 강)
   autoEdit: true,
   cutBeats: 4,
   punch: 0.045,
@@ -342,6 +343,8 @@ function sceneAt(t, videoEl, opts = {}) {
     shake: shakeAmp(t, env),
     colorFx: (S.fx && S.fx.color) || 'none',
     edgeOn: !!(S.fx && S.fx.edge),
+    psy: (S.fx && S.fx.psy) || 0,
+    beat: (S.arr && S.arr.beat) || 60 / (S.bpm || 140),
     title1: S.title1,
     title2: S.title2,
     bpm: S.bpm,
@@ -982,6 +985,7 @@ function loadState() {
       shake: [0, 1, 2].includes(d.fx.shake) ? d.fx.shake : 1,
       color: ['none', 'vivid', 'warm', 'neon', 'mono'].includes(d.fx.color) ? d.fx.color : 'vivid',
       edge: d.fx.edge !== false,
+      psy: [0, 1, 2].includes(d.fx.psy) ? d.fx.psy : 1,
     };
   }
   S.cutBeats = [1, 2, 4, 8].includes(d.cutBeats) ? d.cutBeats : 4;
@@ -1022,6 +1026,7 @@ function renderRes() {
   return { w: 720, h: 1280, scale: 2 / 3, vbps: 4000000, abps: 160000, label: '720×1280' };
 }
 
+// ① 고정 30fps(WebCodecs) 렌더 → ② 안 되면 실시간 MediaRecorder 녹화
 async function renderAll() {
   if (playing) stopPlayback();
   const arr = rebuild();
@@ -1046,75 +1051,132 @@ async function renderAll() {
   const name = `daini-remix_${stamp.getFullYear()}${String(stamp.getMonth() + 1).padStart(2, '0')}${String(stamp.getDate()).padStart(2, '0')}-${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}_${arr.total.toFixed(1)}s`;
 
   let videoDone = false;
-  const canVideo = typeof rc.captureStream === 'function' && !!window.MediaRecorder;
-
-  if (canVideo) {
+  let frameInfo = '';
+  const addThumb = () => {
     try {
-      const mime = pickMime();
-      const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-      const stream = rc.captureStream(30);
-      const dest = ctx.createMediaStreamDestination();
-      stream.addTrack(dest.stream.getAudioTracks()[0]);
+      const thumbBlob = dataURItoBlob(rc.toDataURL('image/jpeg', 0.9));
+      addOut('썸네일 (JPG)', `${rc.width}×${rc.height}`, URL.createObjectURL(thumbBlob), `${name}_thumb.jpg`, thumbBlob, 'image/jpeg');
+    } catch (e) {}
+  };
 
-      const rec = new MediaRecorder(stream, mime
-        ? { mimeType: mime, videoBitsPerSecond: RES.vbps, audioBitsPerSecond: RES.abps }
-        : { videoBitsPerSecond: RES.vbps });
-      const chunks = [];
-      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-      const stopped = new Promise((r) => { rec.onstop = r; });
-
-      const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
-      const t0 = ctx.currentTime + 0.4;
-      const mix = scheduleMix(ctx, dest, arr, t0, beatBuf);
-      await engine.startAt(0, false);   // 프리롤: 재생 준비만, 1배속 시작은 녹화와 동시에
-      el.renderMsg.textContent = `렌더링 중… 0.0 / ${arr.total.toFixed(1)}초 (실시간)`;
-
-      let started = false;
-      await new Promise((resolve) => {
-        const step = () => {
-          const t = ctx.currentTime - t0;
-          if (t < 0) { requestAnimationFrame(step); return; }
-          if (!started) { started = true; try { rec.start(250); } catch (e) {} engine.playNow(); }
-          if (t >= arr.total + 0.01) { resolve(); return; }
-          engine.sync(t);
-          engine.follow(t);
-          drawScene(rctx, sceneAt(t, engine.activeEl, { scale: RES.scale }));
-          el.renderBar.style.width = `${clamp((t / arr.total) * 100, 2, 100)}%`;
-          el.renderMsg.textContent = `렌더링 중… ${t.toFixed(1)} / ${arr.total.toFixed(1)}초 (실시간)`;
-          requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
+  // ── ① 30fps 고정 렌더: 1/30초마다 원본을 seek해 한 장씩 인코딩 (프레임 드랍 0%) ──
+  if (webCodecsSupported()) {
+    try {
+      el.renderMsg.textContent = '30fps 고정 렌더 준비 중… (오디오 믹스)';
+      el.renderBar.style.width = '3%';
+      const mixBuf = await renderMixBuffer(arr);
+      let lastPaint = 0;
+      const out = await encodeMp4({
+        canvas: rc,
+        res: RES,
+        total: arr.total,
+        shots: arr.shots,
+        videoDur: S.videoDur,
+        videoUrl: S.videoUrl,
+        audioBuffer: mixBuf,
+        draw: (t, videoEl) => drawScene(rctx, sceneAt(t, videoEl, { scale: RES.scale })),
+        onProgress: (p) => {
+          const now = performance.now();
+          if (p.phase === 'video') {
+            el.renderBar.style.width = `${clamp(3 + (p.i / p.frames) * 95, 3, 99).toFixed(1)}%`;
+            if (now - lastPaint > 200 || p.i === p.frames) {
+              lastPaint = now;
+              el.renderMsg.textContent = `30fps 고정 렌더링 중… ${p.i} / ${p.frames}프레임 (${p.t.toFixed(1)}초)`;
+            }
+          } else if (now - lastPaint > 200) {
+            lastPaint = now;
+            el.renderMsg.textContent = '오디오 인코딩 중…';
+          }
+        },
       });
-
-      try { rec.stop(); } catch (e) {}
-      await stopped;
-      mix.stop();
-      engine.pauseAll();
-      el.renderBar.style.width = '100%';
-
-      const blob = new Blob(chunks, { type: mime || 'video/webm' });
-      if (blob.size > 1000) {
-        const vidUrl = URL.createObjectURL(blob);
-        addOut(`영상 (${ext.toUpperCase()})`, `${(blob.size / 1048576).toFixed(1)}MB · ${arr.total.toFixed(1)}초`, vidUrl, `${name}.${ext}`, blob, (mime || 'video/webm').split(';')[0]);
+      if (out && out.blob && out.blob.size > 1000) {
+        addOut('영상 (MP4 · 30fps 고정)',
+          `${(out.blob.size / 1048576).toFixed(1)}MB · ${out.duration.toFixed(1)}초 · ${out.frames}프레임 @30fps`,
+          URL.createObjectURL(out.blob), `${name}.mp4`, out.blob, 'video/mp4');
         videoDone = true;
-      } else {
-        el.renderMsg.className = 'status err';
-        el.renderMsg.textContent = '영상 녹화가 비어 있어요. 오디오(WAV)로 저장해 주세요.';
+        frameInfo = `${out.frames}프레임 @30fps`;
+        el.renderBar.style.width = '100%';
+        addThumb();
       }
-      // 썸네일
-      try {
-        const img = rc.toDataURL('image/jpeg', 0.9);
-        const thumbBlob = dataURItoBlob(img);
-        addOut('썸네일 (JPG)', `${rc.width}×${rc.height}`, URL.createObjectURL(thumbBlob), `${name}_thumb.jpg`, thumbBlob, 'image/jpeg');
-      } catch (e) {}
     } catch (e) {
-      console.error(e);
-      el.renderMsg.className = 'status err';
-      el.renderMsg.textContent = '이 브라우저에서는 영상 녹화가 막혔어요. 오디오(WAV)는 계속 만들 수 있어요.';
+      console.warn('30fps 고정 인코딩 실패 → 실시간 녹화로 전환', e);
+      el.renderMsg.textContent = '30fps 인코딩이 안 돼 실시간 녹화로 다시 시도해요…';
+      await new Promise((r) => setTimeout(r, 120));
     }
-  } else {
-    el.renderMsg.className = 'status err';
-    el.renderMsg.textContent = '이 브라우저는 영상 녹화(MediaRecorder)를 지원하지 않아요. 고음질 WAV로 저장해 주세요.';
+  }
+
+  // ── ② 폴백: 실시간 MediaRecorder (DOM 갱신은 200ms에 한 번만 — 사파리 리플로우 부담 제거) ──
+  if (!videoDone) {
+    const canVideo = typeof rc.captureStream === 'function' && !!window.MediaRecorder;
+    if (canVideo) {
+      try {
+        const mime = pickMime();
+        const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+        const stream = rc.captureStream(30);
+        const dest = ctx.createMediaStreamDestination();
+        stream.addTrack(dest.stream.getAudioTracks()[0]);
+
+        const rec = new MediaRecorder(stream, mime
+          ? { mimeType: mime, videoBitsPerSecond: RES.vbps, audioBitsPerSecond: RES.abps }
+          : { videoBitsPerSecond: RES.vbps });
+        const chunks = [];
+        rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        const stopped = new Promise((r) => { rec.onstop = r; });
+
+        const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
+        const t0 = ctx.currentTime + 0.4;
+        const mix = scheduleMix(ctx, dest, arr, t0, beatBuf);
+        await engine.startAt(0, false);   // 프리롤: 재생 준비만, 1배속 시작은 녹화와 동시에
+        el.renderMsg.textContent = `렌더링 중… 0.0 / ${arr.total.toFixed(1)}초 (실시간)`;
+
+        let started = false;
+        let lastPaint = 0;
+        await new Promise((resolve) => {
+          const step = () => {
+            const t = ctx.currentTime - t0;
+            if (t < 0) { requestAnimationFrame(step); return; }
+            if (!started) { started = true; try { rec.start(250); } catch (e) {} engine.playNow(); }
+            if (t >= arr.total + 0.01) { resolve(); return; }
+            engine.sync(t);
+            engine.follow(t);
+            drawScene(rctx, sceneAt(t, engine.activeEl, { scale: RES.scale }));
+            const now = performance.now();
+            if (now - lastPaint > 200) {           // 매 프레임 DOM 갱신 → 200ms에 1번
+              lastPaint = now;
+              el.renderBar.style.width = `${clamp((t / arr.total) * 100, 2, 100)}%`;
+              el.renderMsg.textContent = `렌더링 중… ${t.toFixed(1)} / ${arr.total.toFixed(1)}초 (실시간)`;
+            }
+            requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        });
+
+        try { rec.stop(); } catch (e) {}
+        await stopped;
+        mix.stop();
+        engine.pauseAll();
+        el.renderBar.style.width = '100%';
+
+        const blob = new Blob(chunks, { type: mime || 'video/webm' });
+        if (blob.size > 1000) {
+          const vidUrl = URL.createObjectURL(blob);
+          addOut(`영상 (${ext.toUpperCase()})`, `${(blob.size / 1048576).toFixed(1)}MB · ${arr.total.toFixed(1)}초`, vidUrl, `${name}.${ext}`, blob, (mime || 'video/webm').split(';')[0]);
+          videoDone = true;
+          frameInfo = '실시간 녹화(가변 프레임)';
+        } else {
+          el.renderMsg.className = 'status err';
+          el.renderMsg.textContent = '영상 녹화가 비어 있어요. 오디오(WAV)로 저장해 주세요.';
+        }
+        addThumb();
+      } catch (e) {
+        console.error(e);
+        el.renderMsg.className = 'status err';
+        el.renderMsg.textContent = '이 브라우저에서는 영상 녹화가 막혔어요. 오디오(WAV)는 계속 만들 수 있어요.';
+      }
+    } else {
+      el.renderMsg.className = 'status err';
+      el.renderMsg.textContent = '이 브라우저는 영상 녹화(MediaRecorder)를 지원하지 않아요. 고음질 WAV로 저장해 주세요.';
+    }
   }
 
   // WAV는 항상 만든다
@@ -1125,7 +1187,7 @@ async function renderAll() {
     addOut('오디오 (WAV 48kHz)', `${(wav.size / 1048576).toFixed(1)}MB · 어디서나 재생`, URL.createObjectURL(wav), `${name}.wav`);
     if (videoDone) {
       el.renderMsg.className = 'status ok';
-      el.renderMsg.textContent = `완료! ${arr.total.toFixed(1)}초 · 목소리 ${S.voice ? S.voice.segments.filter((x) => x.on).length : 0}구간 · ${arr.cutCount}컷`;
+      el.renderMsg.textContent = `완료! ${arr.total.toFixed(1)}초 · ${frameInfo} · 목소리 ${S.voice ? S.voice.segments.filter((x) => x.on).length : 0}구간 · ${arr.cutCount}컷`;
     }
   } catch (e) {
     console.error(e);
@@ -1225,9 +1287,10 @@ function addOut(title, meta, url, filename, blob, mime) {
   if (showShare && el.saveHint) el.saveHint.hidden = false;
 }
 
-async function renderWav(arr) {
+// 48kHz 스테레오 최종 믹스 (WAV · AAC 인코딩 공용)
+async function renderMixBuffer(arr) {
   const sr = 48000;
-  const oc = new OfflineAudioContext(2, Math.ceil(arr.total * sr), sr);
+  const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil(arr.total * sr)), sr);
   const beatBuf = S.beatMode === 'synth'
     ? buildBeat(oc, {
         genre: S.genre, bpm: S.bpm, total: arr.total,
@@ -1235,7 +1298,11 @@ async function renderWav(arr) {
       })
     : null;
   scheduleMix(oc, oc.destination, arr, 0, beatBuf);
-  const rendered = await oc.startRendering();
+  return await oc.startRendering();
+}
+
+async function renderWav(arr) {
+  const rendered = await renderMixBuffer(arr);
   return encodeWav([rendered.getChannelData(0), rendered.getChannelData(1)], rendered.sampleRate);
 }
 
@@ -1315,14 +1382,14 @@ const FX_COLOR_LABEL = { none: '원본', vivid: '선명하게', warm: '빈티지
 
 function autoFxCfg() {
   const presets = {
-    techno: { punch: 0.045, flash: 0.1, shake: 1, color: 'vivid', edge: true, cutBeats: 4 },
-    house: { punch: 0.035, flash: 0.08, shake: 1, color: 'warm', edge: true, cutBeats: 4 },
-    trap: { punch: 0.06, flash: 0.12, shake: 2, color: 'neon', edge: true, cutBeats: 2 },
-    lofi: { punch: 0.02, flash: 0.05, shake: 0, color: 'warm', edge: true, cutBeats: 8 },
+    techno: { punch: 0.045, flash: 0.1, shake: 1, color: 'vivid', edge: true, psy: 1, cutBeats: 4 },
+    house: { punch: 0.035, flash: 0.08, shake: 1, color: 'warm', edge: true, psy: 1, cutBeats: 4 },
+    trap: { punch: 0.06, flash: 0.12, shake: 2, color: 'neon', edge: true, psy: 2, cutBeats: 2 },
+    lofi: { punch: 0.02, flash: 0.05, shake: 0, color: 'warm', edge: true, psy: 0, cutBeats: 8 },
   };
   const c = { ...(presets[S.genre] || presets.techno) };
-  if (S.bpm >= 150) { c.flash = Math.min(0.18, +(c.flash * 1.2).toFixed(3)); c.shake = Math.min(2, c.shake + 1); }
-  if (S.bpm <= 100) { c.flash = +(c.flash * 0.6).toFixed(3); c.shake = 0; c.cutBeats = 8; }
+  if (S.bpm >= 150) { c.flash = Math.min(0.18, +(c.flash * 1.2).toFixed(3)); c.shake = Math.min(2, c.shake + 1); c.psy = Math.min(2, (c.psy || 0) + 1); }
+  if (S.bpm <= 100) { c.flash = +(c.flash * 0.6).toFixed(3); c.shake = 0; c.cutBeats = 8; c.psy = 0; }
   return c;
 }
 
@@ -1331,7 +1398,7 @@ function applyAutoFx(silent) {
   S.punch = c.punch;
   S.flash = c.flash;
   S.cutBeats = c.cutBeats;
-  S.fx = { ...S.fx, shake: c.shake, color: c.color, edge: c.edge };
+  S.fx = { ...S.fx, shake: c.shake, color: c.color, edge: c.edge, psy: c.psy };
   syncFxControls();
   rebuild();
   saveState();
@@ -1345,7 +1412,8 @@ function fxSummaryText() {
   const flash = { 0: '끔', 0.05: '약', 0.1: '중', 0.18: '강' }[lv(S.flash, [0, 0.05, 0.1, 0.18])];
   const shake = ['끔', '약', '강'][S.fx.shake || 0];
   const color = FX_COLOR_LABEL[S.fx.color] || '원본';
-  return `줌 펀치 ${punch} · 플래시 ${flash} · 쉐이크 ${shake} · ${color} · 테두리 ${S.fx.edge ? 'ON' : 'OFF'}`;
+  const psy = ['끔', '약', '강'][S.fx.psy || 0];
+  return `줌 펀치 ${punch} · 플래시 ${flash} · 쉐이크 ${shake} · ${color} · 테두리 ${S.fx.edge ? 'ON' : 'OFF'} · 🪩 싸이키 ${psy}`;
 }
 
 function syncFxControls() {
@@ -1361,6 +1429,7 @@ function syncFxControls() {
   if (el.fxShake) el.fxShake.value = String(S.fx.shake || 0);
   if (el.fxColor) el.fxColor.value = S.fx.color || 'none';
   if (el.fxEdge) el.fxEdge.checked = !!S.fx.edge;
+  if (el.fxPsy) el.fxPsy.value = String(S.fx.psy || 0);
   if (el.fxSummary) el.fxSummary.textContent = fxSummaryText();
   if (el.fxModes) {
     el.fxModes.querySelectorAll('button').forEach((b) => {
@@ -1708,6 +1777,7 @@ function bind() {
   if (el.fxShake) el.fxShake.addEventListener('change', () => { S.fx.shake = +el.fxShake.value; manualFx(); });
   if (el.fxColor) el.fxColor.addEventListener('change', () => { S.fx.color = el.fxColor.value; manualFx(); });
   if (el.fxEdge) el.fxEdge.addEventListener('change', () => { S.fx.edge = el.fxEdge.checked; S.pulse = el.fxEdge.checked; manualFx(); });
+  if (el.fxPsy) el.fxPsy.addEventListener('change', () => { S.fx.psy = +el.fxPsy.value; manualFx(); });
 
   // 자동 편집
   el.autoEdit.addEventListener('change', () => {
@@ -1802,7 +1872,7 @@ function cacheEls() {
     autoEdit: 'autoEdit', editOpts: 'editOpts', cutBeats: 'cutBeats',
     fxModes: 'fxModes', fxAutoBlock: 'fxAutoBlock', fxManualBlock: 'fxManualBlock',
     fxSummary: 'fxSummary', btnFxAuto: 'btnFxAuto', fxPunch: 'fxPunch', fxFlash: 'fxFlash',
-    fxShake: 'fxShake', fxColor: 'fxColor', fxEdge: 'fxEdge',
+    fxShake: 'fxShake', fxColor: 'fxColor', fxEdge: 'fxEdge', fxPsy: 'fxPsy',
     fitModes: 'fitModes', fitHint: 'fitHint', btnHighlight: 'btnHighlight',
     fitY: 'fitY', fitYOut: 'fitYOut',
     fmtChips: 'fmtChips', fmtBg: 'fmtBg', fmtAccent: 'fmtAccent', fmtFont: 'fmtFont', fmtFontOut: 'fmtFontOut',
