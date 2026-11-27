@@ -252,22 +252,8 @@
     state.channels = CFG.CHANNELS.map((c) => ({ ...c }));
     state.members = CFG.MEMBERS.map((m) => ({ ...m, channels: [...m.channels] }));
     const t = Date.now();
-    state.messages = [{
-      id: uid(),
-      channel: 'general',
-      authorId: 'boknim',
-      authorName: '복님이',
-      authorKind: 'pickle',
-      body: '대장님, 「달콩 비서실」 v1.1로 올렸습니다 🥒\n' +
-            '이제 서브피클이 1호 🌱 · 2호 🌿 · 3호 🍀 셋으로 나뉘어 일합니다.\n\n' +
-            '· 부르고 싶은 비서는 아래 칩으로 @멘션하거나 그냥 이름을 불러 주세요.\n' +
-            '· 작업실 카드에서 「🤝 넘기기」로 일을 넘기고, 「📋 바통터치 복사」로 다른 AI에 그대로 붙여넣을 수 있는 인수인계문을 복사합니다.\n' +
-            '· 설정(⚙️) → AI 연결에 키를 넣으면 GPT·클로드·제미나이가 진짜로 답합니다. 지금은 시뮬레이션 모드예요.\n' +
-            '· 두 대 이상에서 같이 쓰려면 설정 → 동기화에서 SQL을 한 번 실행해 주세요.',
-      kind: 'chat',
-      meta: {},
-      createdAt: new Date(t - 60 * 1000).toISOString(),
-    }];
+    // v8 — 첫 안내 메시지는 고정 id 를 써서 기기끼리 같은 대화로 합쳐지게 합니다.
+    state.messages = [Object.assign(bootstrapMessage(), { createdAt: new Date(t - 60 * 1000).toISOString() })];
     state.tasks = [
       ...SEED_TASKS.map(cloneTask),
       { id: uid(), title: '서브폰 Pickle 3대를 서브1·2·3에 연결하기', assignee: 'sub1', status: 'todo', note: '서브폰 Pickle 앱 → 복님이와 친구 → 각 폰의 핸들을 비서현황에서 이름에 맞춰 정리', handoff: normalizeHandoff({}), createdAt: new Date(t - 30 * 60e3).toISOString(), updatedAt: new Date(t - 30 * 60e3).toISOString() },
@@ -318,11 +304,12 @@
       authorName: '복님이',
       authorKind: 'pickle',
       body: '대장님, 「달콩 비서실」을 Supabase 실시간 서버에 연결했습니다 🥒\n' +
-            '작업실 카드와 메모가 서버에 한 번 올라갔고, 이제 폰·PC 어느 기기에서 열어도 같은 비서실이 보입니다.\n\n' +
+            '작업실 카드와 메모를 서버에 한 번 올려 두었습니다. 이제 폰·PC 어느 기기에서 열어도 같은 비서실이 보입니다.\n\n' +
             '· 작업실 — 진행 중 프로젝트 4종(에디토 · 우리끼리 v23 · 다인이네 숏츠 · 데일리 트렌드 뷰어) 인수인계 카드\n' +
             '· 메모 — 🤝 바통터치 사용법, 진행 중 프로젝트 4종 목록\n' +
-            '· 카드를 누르면 「🤝 인수인계 상세」에서 저장소·라이브 URL, 한 일, 이어서 할 일을 볼 수 있어요.\n' +
-            '· 한 번 올라간 데이터는 스스로 다시 채우지 않습니다. 카드·메모는 직접 지우거나 고치면 그대로 서버에 반영됩니다.',
+            '· 카드의 「🤝 인수인계 상세」를 펼치면 저장소·라이브 URL, 한 일, 이어서 할 일이 보입니다.\n' +
+            '· 한 번 올린 데이터는 스스로 다시 채우지 않습니다. 카드·메모를 지우면 서버에서도 함께 사라집니다.\n' +
+            '· 부르고 싶은 비서는 아래 칩으로 @멘션하거나 그냥 이름을 불러 주세요.',
       kind: 'chat',
       meta: { v: '8' },
       createdAt: nowISO(),
