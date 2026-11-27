@@ -687,7 +687,9 @@ function updateArrangeUI() {
   el.totalBars.textContent = String(+(totalBeats(S.sections) / 4).toFixed(2));
   el.bpmLabel.textContent = String(S.bpm);
   el.cutCount.textContent = String(arr.cutCount);
-  el.lenCustom.value = S.lenUnit === 'sec' ? arr.total.toFixed(1) : String(+(totalBeats(S.sections) / 4).toFixed(2));
+  if (document.activeElement !== el.lenCustom) {
+    el.lenCustom.value = S.lenUnit === 'sec' ? arr.total.toFixed(1) : String(+(totalBeats(S.sections) / 4).toFixed(2));
+  }
   el.lenUnitLabel.textContent = S.lenUnit === 'sec' ? '초' : '마디';
 
   // 타임라인 바
@@ -1116,9 +1118,9 @@ function syncControls() {
 
 function fitAutoTitles() {
   // 비트/장르가 바뀌면 2번째 줄의 BPM 숫자만 조용히 갱신
-  if (/\bBPM\b/.test(S.title2)) {
-    S.title2 = S.title2.replace(/\d+\s*BPM/, `${S.bpm}BPM`);
-    el.title2.value = S.title2;
+  if (/BPM/i.test(S.title2)) {
+    const next = S.title2.replace(/(\*?)(\d+)(\*?\s*)BPM/gi, (m, a, num, b) => `${a}${S.bpm}${b}BPM`);
+    if (next !== S.title2) { S.title2 = next; el.title2.value = next; }
   }
 }
 
@@ -1280,9 +1282,12 @@ function bind() {
     el.lenPresets.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   });
   function applyTarget(sec) {
+    if (!isFinite(sec) || sec <= 0) return;
+    const cur = S.arr ? S.arr.total : 0;
+    if (Math.abs(cur - sec) < 0.06) return;   // 이미 그 길이면 그대로
     S.sections = fitToSeconds(S.sections, S.bpm, sec);
     rebuild(); saveState();
-    toast(`총 ${sec}초에 맞췄어요`);
+    toast(`총 ${S.arr.total.toFixed(1)}초에 맞췄어요`);
   }
   el.lenCustom.addEventListener('change', () => {
     const v = +el.lenCustom.value;
