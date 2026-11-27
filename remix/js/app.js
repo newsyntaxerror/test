@@ -31,7 +31,7 @@ const S = {
   fitMode: 'smooth',    // smooth = 1배속 부드럽게(기본) · beatcut = 비트 점프컷
   renderRes: null,      // '720' | '1080' — 모바일 기본은 720p
   fxMode: 'auto',       // auto = 알아서 편집 · manual = 직접 편집
-  fx: { shake: 1, color: 'vivid', edge: true, psy: 1 },   // psy = 🪩 싸이키 조명 (0 끔 · 1 약 · 2 강)
+  fx: { shake: 1, color: 'vivid', edge: true, psy: 2 },   // psy = 🪩 싸이키 조명 (0 끔 · 1 약 · 2 강)
   autoEdit: true,
   cutBeats: 4,
   punch: 0.045,
@@ -985,7 +985,7 @@ function loadState() {
       shake: [0, 1, 2].includes(d.fx.shake) ? d.fx.shake : 1,
       color: ['none', 'vivid', 'warm', 'neon', 'mono'].includes(d.fx.color) ? d.fx.color : 'vivid',
       edge: d.fx.edge !== false,
-      psy: [0, 1, 2].includes(d.fx.psy) ? d.fx.psy : 1,
+      psy: [0, 1, 2].includes(d.fx.psy) ? d.fx.psy : 2,
     };
   }
   S.cutBeats = [1, 2, 4, 8].includes(d.cutBeats) ? d.cutBeats : 4;
@@ -1382,7 +1382,7 @@ const FX_COLOR_LABEL = { none: '원본', vivid: '선명하게', warm: '빈티지
 
 function autoFxCfg() {
   const presets = {
-    techno: { punch: 0.045, flash: 0.1, shake: 1, color: 'vivid', edge: true, psy: 1, cutBeats: 4 },
+    techno: { punch: 0.045, flash: 0.1, shake: 1, color: 'vivid', edge: true, psy: 2, cutBeats: 4 },
     house: { punch: 0.035, flash: 0.08, shake: 1, color: 'warm', edge: true, psy: 1, cutBeats: 4 },
     trap: { punch: 0.06, flash: 0.12, shake: 2, color: 'neon', edge: true, psy: 2, cutBeats: 2 },
     lofi: { punch: 0.02, flash: 0.05, shake: 0, color: 'warm', edge: true, psy: 0, cutBeats: 8 },

@@ -214,6 +214,8 @@ function applyColorFx(c, el, box, sx, sy, sw, sh, gx, gy, mode) {
 // ── 🪩 싸이키 조명 — 박자마다 클럽 컬러 스포트라이트가 교차 ────────────
 const PSY_COLORS = ['#FF2A85', '#00F5D4', '#8B5CF6', '#FFE600'];
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
+// 색마다 세기 보정 — 노랑은 밝은 영상에서 세피아처럼 들러붙어 약하게, 바이올렛은 살짝 약하게
+const PSY_WEIGHT = [1, 1, 0.85, 0.55];
 
 function hexRgb(hex) {
   const h = String(hex || '#FF2A85').replace('#', '');
@@ -241,6 +243,8 @@ function drawPsyLighting(c, box, S) {
   const A = PSY_COLORS[((bi % 4) + 4) % 4];                 // 이번 박의 주조색
   const B = PSY_COLORS[(((bi + 1) % 4) + 4) % 4];           // 다음 박의 색(박 끝에서 교차)
   const mixT = clamp01((ph - 0.62) / 0.38);                 // 박 뒤쪽 38%에서 다음 색으로 넘어감
+  const wA = PSY_WEIGHT[((bi % 4) + 4) % 4];
+  const wB = PSY_WEIGHT[(((bi + 1) % 4) + 4) % 4];
   const pulse = 0.62 + 0.38 * env;    // 박자마다 밝아짐
   const k = strong ? 1 : 0.55;        // 강/약 배율
 
@@ -251,20 +255,20 @@ function drawPsyLighting(c, box, S) {
 
   // 1) 컬러 틴트 — 밝기(luminance)는 그대로 두고 색상만 옅게 입힌다(얼굴이 하얗게 타지 않음)
   c.globalCompositeOperation = 'color';
-  c.globalAlpha = (strong ? 0.20 : 0.15) * pulse;
+  c.globalAlpha = (strong ? 0.20 : 0.15) * pulse * wA;
   c.fillStyle = A;
   c.fillRect(box.x, box.y, box.w, box.h);
   if (mixT > 0.001) {
-    c.globalAlpha = (strong ? 0.18 : 0.13) * pulse * mixT;
+    c.globalAlpha = (strong ? 0.18 : 0.13) * pulse * mixT * wB;
     c.fillStyle = B;
     c.fillRect(box.x, box.y, box.w, box.h);
   }
 
   // 2) 화면 전체를 적시는 클럽 컬러 워시
   const wash = c.createLinearGradient(box.x, box.y, box.x + box.w * 0.4, box.y + box.h);
-  wash.addColorStop(0, withAlpha(A, (strong ? 0.09 : 0.07) * pulse));
-  wash.addColorStop(0.6, withAlpha(A, (strong ? 0.05 : 0.04) * pulse));
-  wash.addColorStop(1, withAlpha(B, (strong ? 0.08 : 0.06) * pulse * mixT));
+  wash.addColorStop(0, withAlpha(A, (strong ? 0.09 : 0.07) * pulse * wA));
+  wash.addColorStop(0.6, withAlpha(A, (strong ? 0.05 : 0.04) * pulse * wA));
+  wash.addColorStop(1, withAlpha(B, (strong ? 0.08 : 0.06) * pulse * mixT * wB));
   c.globalCompositeOperation = 'screen';
   c.globalAlpha = 1;
   c.fillStyle = wash;
@@ -274,13 +278,14 @@ function drawPsyLighting(c, box, S) {
   const spots = strong ? 4 : 3;
   for (let i = 0; i < spots; i++) {
     const col = (i % 2 === 0) ? A : B;
+    const w = (i % 2 === 0) ? wA : wB;
     const ang = t * (0.9 + i * 0.17) + (i * Math.PI * 2) / spots;
     const edge = 0.40 + 0.06 * Math.sin(ang * 0.7 + i);
     const cx = box.x + box.w * (0.5 + edge * Math.cos(ang));
     const cy = box.y + box.h * (0.5 + (edge + 0.03) * Math.sin(ang * 1.07 + i * 1.3));
     const rad = Math.min(box.w, box.h) * (strong ? 0.36 : 0.34) * (0.92 + 0.14 * Math.sin(ang * 0.8));
     const g = c.createRadialGradient(cx, cy, 0, cx, cy, rad);
-    const a0 = (strong ? 0.85 : 0.58) * pulse * (i === 0 ? 1 : 0.85);
+    const a0 = (strong ? 0.85 : 0.58) * pulse * w * (i === 0 ? 1 : 0.85);
     g.addColorStop(0, withAlpha(col, a0));
     g.addColorStop(0.2, withAlpha(col, a0 * 0.52));
     g.addColorStop(0.55, withAlpha(col, a0 * 0.14));
@@ -297,7 +302,7 @@ function drawPsyLighting(c, box, S) {
       const cy = box.y + box.h * (0.42 + 0.30 * Math.sin(ang * 1.11 + i));
       const rad = Math.min(box.w, box.h) * (strong ? 0.30 : 0.28);
       const g = c.createRadialGradient(cx, cy, 0, cx, cy, rad);
-      const a0 = (strong ? 0.34 : 0.23) * pulse;
+      const a0 = (strong ? 0.34 : 0.23) * pulse * (i ? wB : wA);
       g.addColorStop(0, withAlpha(i ? B : A, a0));
       g.addColorStop(0.35, withAlpha(i ? B : A, a0 * 0.35));
       g.addColorStop(1, withAlpha(i ? B : A, 0));
@@ -316,7 +321,7 @@ function drawPsyLighting(c, box, S) {
     for (let j = 0; j < beams; j++) {
       const col = j % 4 === 3 ? B : A;
       cg.addColorStop(j / beams, withAlpha(col, 0));
-      cg.addColorStop((j + 0.5) / beams, withAlpha(col, 0.10 * pulse));
+      cg.addColorStop((j + 0.5) / beams, withAlpha(col, 0.10 * pulse * (j % 4 === 3 ? wB : wA)));
     }
     c.fillStyle = cg;
     c.fillRect(box.x, box.y, box.w, box.h);
@@ -329,7 +334,7 @@ function drawPsyLighting(c, box, S) {
       box.x + box.w / 2, box.y + box.h * 0.5, Math.max(box.w, box.h) * 0.8,
     );
     g2.addColorStop(0, withAlpha(A, 0));
-    g2.addColorStop(1, withAlpha(B, (strong ? 0.34 : 0.20) * env));
+    g2.addColorStop(1, withAlpha(B, (strong ? 0.34 : 0.20) * env * wB));
     c.fillStyle = g2;
     c.fillRect(box.x, box.y, box.w, box.h);
   }
@@ -412,10 +417,12 @@ export function drawScene(c, S) {
   // 싸이키 조명의 배경 번짐 (영상 뒤쪽 테두리로 새어 나오는 빛)
   if (S.psy && dark) {
     const beatSec = Math.max(0.14, S.beat || 0.43);
-    const col = PSY_COLORS[Math.floor(Math.max(0, t) / beatSec) % 4];
+    const bi2 = Math.floor(Math.max(0, t) / beatSec);
+    const col = PSY_COLORS[((bi2 % 4) + 4) % 4];
+    const w = PSY_WEIGHT[((bi2 % 4) + 4) % 4];
     const g = c.createRadialGradient(W / 2, H * 0.5, W * 0.18, W / 2, H * 0.5, W * 0.92);
     g.addColorStop(0, withAlpha(col, 0));
-    g.addColorStop(1, withAlpha(col, (S.psy >= 2 ? 0.12 : 0.09) * (0.45 + 0.55 * env)));
+    g.addColorStop(1, withAlpha(col, (S.psy >= 2 ? 0.12 : 0.09) * (0.45 + 0.55 * env) * w));
     c.save();
     c.globalCompositeOperation = 'screen';
     c.fillStyle = g;
