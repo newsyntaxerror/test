@@ -1,5 +1,5 @@
 /* 옹알이 리믹스 — 오프라인 앱 셸 */
-const VERSION = 'remix-v1.4.0';
+const VERSION = 'remix-v1.4.1';
 const ASSETS = [
   './',
   './index.html',

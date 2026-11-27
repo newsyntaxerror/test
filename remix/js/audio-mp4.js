@@ -142,6 +142,20 @@ function parseAsc(asc) {
 }
 
 // ── 오디오 트랙(stsd) 읽기 ─────────────────────────────────
+// 편집 리스트(edts/elst)의 media_time — AAC 인코더 프라이밍(지연)을 재생기가 건너뛰는 양.
+// 우리는 원시 AAC 프레임을 그대로 다시 담으므로, 이 값을 타임라인 보정에 더해야 한다.
+function readEditStart(u8, trak, timescale) {
+  const elst = pathBox(u8, trak, ['edts', 'elst']);
+  if (!elst || !timescale) return 0;
+  const version = u8[elst.data];
+  const count = readU32(u8, elst.data + 4);
+  if (!count) return 0;
+  const base = elst.data + 8;
+  const mediaTime = version === 1 ? readU64(u8, base + 8) : readI32(u8, base + 4);
+  if (!(mediaTime > 0)) return 0;
+  return mediaTime / timescale;
+}
+
 function readAudioEntry(u8, trak) {
   const stbl = pathBox(u8, trak, ['mdia', 'minf', 'stbl']);
   if (!stbl) return null;
@@ -406,7 +420,7 @@ export function demuxAudioMp4(buffer) {
     }
     const entry = readAudioEntry(u8, trak);
     if (!entry) continue;
-    picked = { timescale, trackId, ...entry };
+    picked = { timescale, trackId, editStart: readEditStart(u8, trak, timescale), ...entry };
     break;
   }
   if (!picked) throw new Error('오디오 트랙을 찾지 못했어요');
@@ -452,6 +466,7 @@ export function demuxAudioMp4(buffer) {
     sampleRate: picked.sampleRate || picked.timescale,
     channels: picked.channels || 2,
     description: picked.description || null,
+    editStart: picked.editStart || 0,
     samples,
   };
 }

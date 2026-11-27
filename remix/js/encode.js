@@ -238,7 +238,8 @@ async function prepareHybridAudio(audioBuffer, audioContext, total, onProgress) 
     if (!src || !src.samples.length) return null;
 
     // 녹음은 실시간이라 '녹음 시작 → 실제 소리' 사이에 지연이 생긴다. 그만큼 당겨서 0초에 맞춘다.
-    const start = await measureAudioStart(rec, audioContext, src.samples[0].ts, rec.intendedOffset, mixFirstSound);
+    // (편집 리스트가 있으면 재생기가 건너뛰는 프라이밍만큼도 함께 당긴다.)
+    const start = await measureAudioStart(rec, audioContext, src.samples[0].ts, rec.intendedOffset, mixFirstSound) + (src.editStart || 0);
     const samples = [];
     for (const s of src.samples) {
       let ts = s.ts - start;
