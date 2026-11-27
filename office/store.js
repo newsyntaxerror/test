@@ -14,6 +14,25 @@
   /* v1.1 — 기본 데이터 버전과 옛 멤버 id 이전 */
   const SEED_VERSION = '1.1';
   const LEGACY_MEMBER_IDS = { subpickle: 'sub1' };
+  /* v7 — 서브1 표시 이름·역할 변경. 예전 기본값('서브1')으로 저장된 값만
+     새 값으로 옮기고, 사용자가 직접 바꾼 다른 이름·역할은 그대로 둡니다. */
+  const LEGACY_MEMBER_FIELDS = {
+    sub1: {
+      nameFrom: '서브1', nameTo: '달콩이sub1',
+      roleFrom: '서브피클 1호 · 이동·현장', roleTo: '서브피클 1호(@leesuho13) · 이동·현장',
+    },
+  };
+  const renamedRemote = new Set();   // 서버 행 이전은 세션당 한 번만 시도
+
+  /* 옛 기본값을 새 기본값으로 바꿉니다. 바뀐 게 있으면 true. */
+  function migrateMemberFields(m) {
+    const mig = m && LEGACY_MEMBER_FIELDS[m.id];
+    if (!mig) return false;
+    let changed = false;
+    if (m.name === mig.nameFrom) { m.name = mig.nameTo; changed = true; }
+    if (m.role === mig.roleFrom) { m.role = mig.roleTo; changed = true; }
+    return changed;
+  }
 
   const uid = () => (window.crypto && crypto.randomUUID
     ? crypto.randomUUID()
@@ -306,17 +325,21 @@
         const keepName = legacy.name && legacy.name !== '서브피클';
         saved.set('sub1', normalizeMember({
           ...legacy, id: 'sub1',
-          name: keepName ? legacy.name : '서브1',
+          name: keepName ? legacy.name : '달콩이sub1',
           emoji: legacy.emoji && legacy.emoji !== '🌿' ? legacy.emoji : '🌱',
           role: legacy.role && legacy.role !== '서브폰 비서 · Pickle' ? legacy.role : '서브피클 1호 · 이동·현장',
           sort: 2,
         }));
       }
     }
+    // v7 — 이 기기에 옛 기본값으로 저장된 서브1 이름·역할을 새 값으로 한 번만 옮깁니다.
+    let nameMigrated = false;
+    saved.forEach((m) => { if (migrateMemberFields(m)) nameMigrated = true; });
     CFG.MEMBERS.forEach((m) => { if (!saved.has(m.id)) saved.set(m.id, normalizeMember(m)); });
     // 기본 멤버의 줄 순서는 config 를 따릅니다(서브1·2·3 이 나란히 오도록).
     CFG.MEMBERS.forEach((m) => { const cur = saved.get(m.id); if (cur) cur.sort = m.sort; });
     state.members = [...saved.values()].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, 'ko'));
+    if (nameMigrated) persist();
 
     // v1.1 기본 카드·메모를 한 번만 합칩니다.
     if (data.seedVersion !== SEED_VERSION) {
@@ -526,6 +549,14 @@
       if (!memRes.error) {
         const remoteMembers = (memRes.data || [])
           .map(rowToMember)
+          .map((m) => {
+            // 서버에 옛 기본값이 남아 있으면 새 값으로 바꿔 한 번 올립니다.
+            if (!renamedRemote.has(m.id) && LEGACY_MEMBER_FIELDS[m.id] && migrateMemberFields(m)) {
+              renamedRemote.add(m.id);
+              queueUpsert('office_members', memberToRow(m), m.id);
+            }
+            return m;
+          })
           .filter((m) => {
             // v1.0 의 단일 '서브피클' 행은 지우고 서브1~3 으로 옮깁니다.
             if (LEGACY_MEMBER_IDS[m.id]) { queueDelete('office_members', m.id); return false; }
