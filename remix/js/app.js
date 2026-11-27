@@ -1133,10 +1133,8 @@ function updateTlPanel() {
   const arr = S.arr;
   if (!arr || !tl.sel) { panel.hidden = true; return; }
   if (tl.sel === 'beat') {
-    panel.hidden = false;
-    el.tlpTitle.textContent = '🎵 비트 트랙';
-    el.tlpPlay.textContent = '▶ 비트만 들어보기';
-    el.tlpOff.hidden = true;
+    // 비트 블록은 아래 '🎵 비트 트랙' 슬라이더로 조절하므로 조각 패널은 띄우지 않는다.
+    panel.hidden = true;
     return;
   }
   const ev = arr.voiceEvents.find((e) => e.id === tl.sel);
