@@ -1,14 +1,25 @@
-// 30fps 고정 인코딩 — WebCodecs(VideoEncoder + AudioEncoder) + 내장 mp4-muxer
+// 30fps 고정 인코딩 — WebCodecs(VideoEncoder) + 내장 mp4-muxer
 // 실시간 MediaRecorder 녹화 대신, 타임라인의 1/30초 지점마다 원본 영상을 seek해
 // 한 장씩 캔버스에 그린 뒤 인코딩한다. 그래서 아이폰에서도 프레임 드랍 없이 진짜 30fps가 나온다.
+//
+// 오디오 두 갈래:
+//   A) AudioEncoder가 있으면(v1.3과 동일) AAC/Opus로 직접 인코딩.
+//   B) iOS 17/18 Safari처럼 AudioEncoder가 없으면(v1.4 하이브리드) 완성된 믹스를
+//      MediaRecorder로 '소리만' 녹음해 그 MP4에서 AAC 프레임을 꺼내 비디오와 합친다.
 import { Muxer, ArrayBufferTarget } from './mp4-muxer.js';
+import {
+  audioRecorderSupported,
+  pickAudioRecorderMime,
+  recordAudioMp4,
+  measureAudioStart,
+  demuxAudioMp4,
+} from './audio-mp4.js';
 
 export const FPS = 30;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 아이폰은 VideoEncoder가 Safari 16.4+ / AudioEncoder(AAC)는 Safari 26+ 에서 지원된다.
-// 둘 다 있어야 '30fps 고정 + 소리' MP4를 만들 수 있다.
 export function webCodecsVideoSupported() {
   return typeof window.VideoEncoder === 'function' && typeof window.VideoFrame === 'function';
 }
@@ -17,9 +28,17 @@ export function webCodecsAudioSupported() {
   return typeof window.AudioEncoder === 'function' && typeof window.AudioData === 'function';
 }
 
+// 영상 인코딩이 가능하면 v1.4 경로(필요하면 하이브리드 오디오)로 간다.
 export function webCodecsSupported() {
-  return webCodecsVideoSupported() && webCodecsAudioSupported();
+  return webCodecsVideoSupported();
 }
+
+// iOS 17/18 Safari: VideoEncoder는 있고 AudioEncoder는 없다. MediaRecorder(오디오 전용)로 소리를 채운다.
+export function hybridAudioSupported() {
+  return webCodecsVideoSupported() && !webCodecsAudioSupported() && audioRecorderSupported();
+}
+
+export { pickAudioRecorderMime };
 
 // ── 인코더 설정 고르기 ────────────────────────────────────
 function videoCandidates(res) {
@@ -41,7 +60,7 @@ export async function pickVideoConfig(res) {
   return null;
 }
 
-// AAC(아이폰/사파리) → Opus(크롬 등) 순서. 둘 다 안 되면 영상 인코딩도 포기하고 MediaRecorder로.
+// AAC(아이폰/사파리) → Opus(크롬 등) 순서.
 export async function pickAudioConfig(sampleRate = 48000) {
   const cands = [
     { codec: 'mp4a.40.2', mux: 'aac', chunk: 1024, bitrate: 192000 },
@@ -148,7 +167,7 @@ export function sourceTimeAt(shots, videoDur, t) {
   return Math.max(0, Math.min(videoDur - 0.01, shot.srcStart));
 }
 
-// ── 오디오: 이미 렌더된 오프라인 믹스(AudioBuffer)를 AAC/Opus로 ──
+// ── 오디오 A: 이미 렌더된 오프라인 믹스(AudioBuffer)를 AAC/Opus로 ──
 async function encodeAudioTrack(audioBuffer, acfg, muxer, onProgress) {
   const srcRate = audioBuffer.sampleRate;
   const totalFrames = audioBuffer.length;
@@ -161,7 +180,6 @@ async function encodeAudioTrack(audioBuffer, acfg, muxer, onProgress) {
   });
   enc.configure({ ...acfg.cfg, sampleRate: srcRate, numberOfChannels: 2 });
   const block = acfg.chunk;
-  const rateScale = 1; // 오프라인 렌더는 48kHz 고정
   for (let off = 0; off < totalFrames; off += block) {
     if (error) break;
     const n = Math.min(block, totalFrames - off);
@@ -173,7 +191,7 @@ async function encodeAudioTrack(audioBuffer, acfg, muxer, onProgress) {
       sampleRate: srcRate,
       numberOfFrames: n,
       numberOfChannels: 2,
-      timestamp: Math.round((off * rateScale * 1e6) / srcRate),
+      timestamp: Math.round((off * 1e6) / srcRate),
       data,
     });
     enc.encode(ad);
@@ -188,6 +206,87 @@ async function encodeAudioTrack(audioBuffer, acfg, muxer, onProgress) {
   if (error) throw error;
 }
 
+// ── 오디오 B: MediaRecorder(오디오 전용) → AAC/Opus 프레임 추출 ──
+// 믹스 원본에서 '첫 소리' 지점을 찾는다(녹음본과 비교해 녹음 시작 지연을 알아내는 용도).
+function bufferFirstSound(audioBuffer) {
+  const L = audioBuffer.getChannelData(0);
+  let peak = 0;
+  for (let i = 0; i < L.length; i += 13) peak = Math.max(peak, Math.abs(L[i]));
+  if (peak < 1e-4) return null;
+  const thr = Math.max(1e-4, peak * 0.02);
+  const n = Math.min(L.length, Math.floor(audioBuffer.sampleRate * 0.8));
+  for (let i = 0; i < n; i += 16) {
+    let m = 0;
+    const e = Math.min(i + 16, L.length);
+    for (let j = i; j < e; j++) m = Math.max(m, Math.abs(L[j]));
+    if (m > thr) return i / audioBuffer.sampleRate;
+  }
+  return null;
+}
+
+async function prepareHybridAudio(audioBuffer, audioContext, total, onProgress) {
+  if (!audioBuffer || !audioRecorderSupported()) return null;
+  const mixFirstSound = bufferFirstSound(audioBuffer);
+  let rec = null;
+  try {
+    onProgress && onProgress({ phase: 'audio-record', t: 0, total: audioBuffer.duration });
+    rec = await recordAudioMp4(audioBuffer, { audioContext, onProgress });
+    if (!rec) return null;
+    onProgress && onProgress({ phase: 'audio-demux' });
+    const raw = await rec.blob.arrayBuffer();
+    const src = demuxAudioMp4(raw);
+    if (!src || !src.samples.length) return null;
+
+    // 녹음은 실시간이라 '녹음 시작 → 실제 소리' 사이에 지연이 생긴다. 그만큼 당겨서 0초에 맞춘다.
+    const start = await measureAudioStart(rec, audioContext, src.samples[0].ts, rec.intendedOffset, mixFirstSound);
+    const samples = [];
+    for (const s of src.samples) {
+      let ts = s.ts - start;
+      let dur = s.dur;
+      if (ts + dur <= 0) continue;
+      if (ts >= total - 0.002) continue;
+      if (ts < 0) { dur += ts; ts = 0; }
+      dur = Math.min(dur, total - ts);
+      if (!(dur > 0)) continue;
+      samples.push({ data: s.data, ts, dur });
+    }
+    if (!samples.length) return null;
+    return {
+      codec: src.codec,
+      sampleRate: src.sampleRate,
+      channels: src.channels,
+      description: src.description,
+      samples,
+    };
+  } catch (e) {
+    console.warn('하이브리드 오디오를 만들지 못했어요 → 무음 30fps 영상으로 저장', e);
+    return null;
+  } finally {
+    rec = null;
+  }
+}
+
+function addHybridAudio(muxer, hyb, onProgress) {
+  const dec = {
+    codec: hyb.codec === 'aac' ? 'mp4a.40.2' : 'opus',
+    sampleRate: hyb.sampleRate,
+    numberOfChannels: hyb.channels,
+  };
+  if (hyb.description) dec.description = hyb.description;
+  const meta = { decoderConfig: dec };
+  for (let i = 0; i < hyb.samples.length; i++) {
+    const s = hyb.samples[i];
+    muxer.addAudioChunkRaw(
+      s.data,
+      'key',
+      Math.round(s.ts * 1e6),
+      Math.round(s.dur * 1e6),
+      i === 0 ? meta : undefined,
+    );
+    if (onProgress && i % 64 === 0) onProgress({ phase: 'audio-mux', done: i, total: hyb.samples.length });
+  }
+}
+
 /**
  * 고정 30fps MP4 인코딩.
  * @param {object} o
@@ -199,22 +298,37 @@ async function encodeAudioTrack(audioBuffer, acfg, muxer, onProgress) {
  * @param {number} o.videoDur 원본 영상 길이
  * @param {string|null} o.videoUrl 원본 영상 URL
  * @param {AudioBuffer|null} o.audioBuffer 오프라인으로 렌더한 48kHz 믹스
+ * @param {AudioContext|null} [o.audioContext] 앱이 쓰는 오디오 컨텍스트(하이브리드 녹음용)
  * @param {(p:object)=>void} [o.onProgress]
  */
 export async function encodeMp4(o) {
-  const { canvas, draw, total, res, shots, videoDur, videoUrl, audioBuffer, onProgress } = o;
-  if (!webCodecsSupported()) return null;
+  const { canvas, draw, total, res, shots, videoDur, videoUrl, audioBuffer, audioContext, onProgress } = o;
+  if (!webCodecsVideoSupported()) return null;
   const vcfg = await pickVideoConfig(res);
   if (!vcfg) return null;
-  const acfg = audioBuffer ? await pickAudioConfig(audioBuffer.sampleRate) : null;
-  if (audioBuffer && !acfg) return null;   // 소리 없는 영상은 만들지 않는다 → MediaRecorder로
 
   const frames = Math.max(1, Math.round(total * FPS));
+
+  // 오디오 경로 결정: A(AudioEncoder) → B(iOS 하이브리드) → 무음
+  let acfg = null;
+  let hybrid = null;
+  if (audioBuffer) {
+    if (webCodecsAudioSupported()) {
+      acfg = await pickAudioConfig(audioBuffer.sampleRate);
+    }
+    if (!acfg) hybrid = await prepareHybridAudio(audioBuffer, audioContext, frames / FPS, onProgress);
+  }
+  const audioTrack = acfg
+    ? { codec: acfg.mux, numberOfChannels: 2, sampleRate: audioBuffer.sampleRate }
+    : hybrid
+      ? { codec: hybrid.codec, numberOfChannels: hybrid.channels, sampleRate: hybrid.sampleRate }
+      : undefined;
+
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
     target,
     video: { codec: 'avc', width: res.w, height: res.h, frameRate: FPS },
-    audio: acfg ? { codec: acfg.mux, numberOfChannels: 2, sampleRate: audioBuffer.sampleRate } : undefined,
+    audio: audioTrack,
     fastStart: 'in-memory',
     firstTimestampBehavior: 'offset',
   });
@@ -226,10 +340,13 @@ export async function encodeMp4(o) {
   });
   venc.configure(vcfg);
 
-  // 오디오 먼저 인코딩(빠름) — 영상 프레임을 하나씩 그리는 동안 기다릴 필요가 없다.
+  // 오디오 먼저(경로 A는 빠른 오프라인 인코딩, 경로 B는 실시간 녹음) — 영상 seek 전에 끝낸다.
   if (acfg) {
     onProgress && onProgress({ phase: 'audio-start', frames });
     await encodeAudioTrack(audioBuffer, acfg, muxer, onProgress);
+  } else if (hybrid) {
+    onProgress && onProgress({ phase: 'audio-mux-start', total: hybrid.samples.length });
+    addHybridAudio(muxer, hybrid, onProgress);
   }
   if (vError) throw vError;
 
@@ -267,7 +384,9 @@ export async function encodeMp4(o) {
     width: res.w,
     height: res.h,
     videoCodec: vcfg.codec,
-    audioCodec: acfg ? acfg.codec : null,
+    audioCodec: acfg ? acfg.codec : hybrid ? hybrid.codec : null,
+    audioPath: acfg ? 'full' : hybrid ? 'hybrid' : 'silent',
+    audioSamples: hybrid ? hybrid.samples.length : 0,
     duration: frames / FPS,
   };
 }

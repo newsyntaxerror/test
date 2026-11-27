@@ -1,7 +1,7 @@
-// 다인이 리믹스 스튜디오 — 앱 로직
-import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.3.0';
-import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported } from './encode.js?v=1.3.0';
-import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.3.0';
+// 옹알이 리믹스 — 앱 로직
+import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.4.0';
+import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.4.0';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.4.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
 import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js';
@@ -1051,6 +1051,7 @@ async function renderAll() {
   const name = `daini-remix_${stamp.getFullYear()}${String(stamp.getMonth() + 1).padStart(2, '0')}${String(stamp.getDate()).padStart(2, '0')}-${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}_${arr.total.toFixed(1)}s`;
 
   let videoDone = false;
+  let audioSilent = false;
   let frameInfo = '';
   const addThumb = () => {
     try {
@@ -1060,12 +1061,14 @@ async function renderAll() {
   };
 
   // ── ① 30fps 고정 렌더: 1/30초마다 원본을 seek해 한 장씩 인코딩 (프레임 드랍 0%) ──
-  if (webCodecsSupported()) {
+  //     오디오는 AudioEncoder가 있으면 직접(A), 없으면(iOS 17/18) 따로 녹음해 합친다(B).
+  if (webCodecsVideoSupported()) {
     try {
       el.renderMsg.textContent = '30fps 고정 렌더 준비 중… (오디오 믹스)';
       el.renderBar.style.width = '3%';
       const mixBuf = await renderMixBuffer(arr);
       let lastPaint = 0;
+      const hybridMode = !webCodecsAudioSupported();
       const out = await encodeMp4({
         canvas: rc,
         res: RES,
@@ -1074,6 +1077,7 @@ async function renderAll() {
         videoDur: S.videoDur,
         videoUrl: S.videoUrl,
         audioBuffer: mixBuf,
+        audioContext: ctx,
         draw: (t, videoEl) => drawScene(rctx, sceneAt(t, videoEl, { scale: RES.scale })),
         onProgress: (p) => {
           const now = performance.now();
@@ -1083,20 +1087,37 @@ async function renderAll() {
               lastPaint = now;
               el.renderMsg.textContent = `30fps 고정 렌더링 중… ${p.i} / ${p.frames}프레임 (${p.t.toFixed(1)}초)`;
             }
+          } else if (p.phase === 'audio-record') {
+            el.renderBar.style.width = `${clamp(3 + (p.t / Math.max(0.1, p.total)) * 40, 3, 45).toFixed(1)}%`;
+            if (now - lastPaint > 200) {
+              lastPaint = now;
+              el.renderMsg.textContent = `소리 녹음 중… ${p.t.toFixed(1)} / ${p.total.toFixed(1)}초 (iOS 하이브리드)`;
+            }
+          } else if (p.phase === 'audio-demux' || p.phase === 'audio-mux-start') {
+            if (now - lastPaint > 200) {
+              lastPaint = now;
+              el.renderMsg.textContent = '녹음한 소리를 영상과 합치는 중…';
+            }
           } else if (now - lastPaint > 200) {
             lastPaint = now;
-            el.renderMsg.textContent = '오디오 인코딩 중…';
+            el.renderMsg.textContent = hybridMode ? '오디오를 준비하는 중…' : '오디오 인코딩 중…';
           }
         },
       });
       if (out && out.blob && out.blob.size > 1000) {
+        const hybridTag = out.audioPath === 'hybrid' ? ' (iOS 하이브리드)' : out.audioPath === 'silent' ? ' (무음)' : '';
         addOut('영상 (MP4 · 30fps 고정)',
-          `${(out.blob.size / 1048576).toFixed(1)}MB · ${out.duration.toFixed(1)}초 · ${out.frames}프레임 @30fps`,
+          `${(out.blob.size / 1048576).toFixed(1)}MB · ${out.duration.toFixed(1)}초 · ${out.frames}프레임 @30fps${hybridTag}`,
           URL.createObjectURL(out.blob), `${name}.mp4`, out.blob, 'video/mp4');
         videoDone = true;
-        frameInfo = `${out.frames}프레임 @30fps`;
+        frameInfo = `${out.frames}프레임 @30fps${hybridTag}`;
         el.renderBar.style.width = '100%';
         addThumb();
+        if (out.audioPath === 'silent') {
+          audioSilent = true;
+          el.renderMsg.className = 'status err';
+          el.renderMsg.textContent = '영상은 30fps로 만들었지만 소리를 넣지 못해 무음이에요. WAV 오디오를 함께 저장해 주세요.';
+        }
       }
     } catch (e) {
       console.warn('30fps 고정 인코딩 실패 → 실시간 녹화로 전환', e);
@@ -1186,7 +1207,7 @@ async function renderAll() {
     const wav = await renderWav(arr);
     addOut('오디오 (WAV 48kHz)', `${(wav.size / 1048576).toFixed(1)}MB · 어디서나 재생`, URL.createObjectURL(wav), `${name}.wav`);
     if (videoDone) {
-      el.renderMsg.className = 'status ok';
+      el.renderMsg.className = audioSilent ? 'status err' : 'status ok';
       el.renderMsg.textContent = `완료! ${arr.total.toFixed(1)}초 · ${frameInfo} · 목소리 ${S.voice ? S.voice.segments.filter((x) => x.on).length : 0}구간 · ${arr.cutCount}컷`;
     }
   } catch (e) {
@@ -1449,10 +1470,14 @@ function syncFxControls() {
 function syncEncodeHint() {
   const node = document.getElementById('renderHint');
   if (!node) return;
-  if (webCodecsSupported()) {
-    node.innerHTML = '영상은 <b>30fps 고정</b>으로 한 장씩 인코딩해요(길이의 2~6배 정도 걸립니다). 슬라이드처럼 끊기지 않고 사진첩에서도 부드럽게 재생돼요. 오디오는 WAV로도 받을 수 있어요.';
-  } else if (webCodecsVideoSupported()) {
-    node.innerHTML = '이 브라우저는 <b>오디오 인코더가 없어</b> 실시간 녹화로 저장돼요(프레임이 조금 끊길 수 있어요). 아이폰은 <b>iOS 26 이상</b>이면 30fps 고정 저장이 켜지고, 지금은 WAV 오디오를 함께 받아 두면 편해요.';
+  if (webCodecsVideoSupported()) {
+    if (webCodecsAudioSupported()) {
+      node.innerHTML = '영상은 <b>30fps 고정</b>으로 한 장씩 인코딩해요(길이의 2~6배 정도 걸립니다). 슬라이드처럼 끊기지 않고 사진첩에서도 부드럽게 재생돼요. 오디오는 WAV로도 받을 수 있어요.';
+    } else if (hybridAudioSupported()) {
+      node.innerHTML = '아이폰 iOS 17/18 Safari에서도 <b>30fps 고정 + 소리</b>로 저장돼요. 소리는 따로 녹음해 영상에 합쳐요(길이의 2~7배 정도 걸립니다). 렌더 중에는 화면을 끄지 마세요.';
+    } else {
+      node.innerHTML = '이 브라우저는 <b>30fps 고정</b>으로 영상을 만들 수 있지만 소리를 넣지 못해 <b>무음</b>로 저장돼요. WAV 오디오를 함께 받아 두면 편해요.';
+    }
   } else {
     node.innerHTML = '이 브라우저는 30fps 고정 인코딩(WebCodecs)을 지원하지 않아 실시간 녹화로 저장돼요. 아이폰 Safari(iOS 16.4+)나 최신 크롬에서 30fps 고정 저장이 켜집니다.';
   }

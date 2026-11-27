@@ -1,6 +1,6 @@
-# 다인이 리믹스 스튜디오
+# 옹알이 리믹스
 
-아기(다인) 영상을 올리면 **목소리(옹알이) 구간을 자동으로 찾아** 비트에 맞춰 컷 편집·리믹스하는 모바일 퍼스트 웹앱(PWA)입니다.
+아기(다인) 영상을 올리면 **목소리(옹알이) 구간을 자동으로 찾아** 비트에 맞춰 컷 편집·리믹스하는 모바일 퍼스트 웹앱(PWA)입니다. 앱 이름은 **옹알이 리믹스**이고, 영상 안의 기본 포맷/배지는 `Ver.1 다인이네`로 남아 있습니다.
 서버 없이 브라우저 안에서만 동작하며(Web Audio / Canvas / WebCodecs / MediaRecorder), 업로드한 영상은 어디에도 전송되지 않습니다.
 
 - 주소: https://newsyntaxerror.github.io/studio/remix/
@@ -33,8 +33,10 @@
    - 기본 `Ver.1 다인이네`(1080×1920 검정, 중앙 940×1000, 상단 2줄 후킹+형광핑크 `#FF2A85`, 하단 치즈냥이+`다인이네`)
    - 풀스크린 9:16 / 화이트 미니멀 / 클럽 네온 EDM
    - 배경·강조색·로고(치즈냥이/검은 강아지/내 이미지)·배지 문구·글자 크기 조정 후 **내 포맷 저장**(localStorage)
-6. **내보내기(v1.3: 30fps 고정 인코딩)**
-   - **WebCodecs 고정 30fps 렌더(우선)**: 1/30초 타임스텝마다 원본 `<video>`를 해당 시점으로 seek해 캔버스에 그린 뒤 `VideoEncoder`(H.264) + `AudioEncoder`(AAC, 미지원 시 Opus)로 한 장씩 인코딩하고 내장 `js/mp4-muxer.js`로 MP4를 만듭니다. 프레임 드랍 0% · CFR 30fps라 아이폰 사진첩에서도 슬라이드처럼 끊기지 않습니다(seek 무한 대기 방지 120ms 타임아웃, 키프레임 2초).
+6. **내보내기(v1.4: 30fps 고정 + iOS 17/18 하이브리드 오디오)**
+   - **WebCodecs 고정 30fps 렌더(우선)**: 1/30초 타임스텝마다 원본 `<video>`를 해당 시점으로 seek해 캔버스에 그린 뒤 `VideoEncoder`(H.264)로 한 장씩 인코딩하고 내장 `js/mp4-muxer.js`로 MP4를 만듭니다. 프레임 드랍 0% · CFR 30fps라 아이폰 사진첩에서도 슬라이드처럼 끊기지 않습니다(seek 무한 대기 방지 120ms 타임아웃, 키프레임 2초).
+   - **오디오 A(경로 A)**: `AudioEncoder`가 있으면(v1.3 방식) 48kHz 믹스를 AAC(없으면 Opus)로 직접 인코딩합니다.
+   - **오디오 B — iOS 17/18 하이브리드(경로 B, v1.4)**: iOS Safari 17/18은 `VideoEncoder`는 있지만 `AudioEncoder`(AAC)가 없습니다. 이때 실시간 `MediaRecorder` 전체 녹화(12fps)로 떨어지지 않고, ① 영상은 위 방식대로 고정 30fps `VideoEncoder`로 인코딩하고 ② 소리는 완성된 48kHz 믹스를 `MediaRecorder`에 **오디오 스트림만**(`MediaStreamAudioDestinationNode`, 영상 트랙 없음) 연결해 `audio/mp4`(AAC)로 녹음한 뒤 ③ 그 MP4 컨테이너의 `moov/moof`를 순수 JS로 파싱해 AAC 샘플과 `esds` AudioSpecificConfig를 꺼내 `muxer.addAudioChunkRaw()`로 비디오와 한 파일로 합칩니다. 결과는 **309프레임 @30fps (iOS 하이브리드)** 로 표시됩니다. 오디오 추출이 실패하면 무음이라도 30fps 영상으로 저장하고 안내합니다.
    - **폴백**: WebCodecs/코덱 미지원 브라우저는 기존 `MediaRecorder` 실시간 녹화(MP4 지원 시 MP4, 아니면 WebM)로 자동 전환. 폴백에서도 프레임 드랍을 줄이도록 렌더 루프의 DOM 갱신을 200ms에 1번만 하고, 숨긴 video 엘리먼트를 `position:fixed;left:-9999px;width:2px`로 DOM에 붙여 iOS 백그라운드 디코딩 스로틀링을 피합니다.
    - **저장 화질 선택(v1.2)**: `720×1280`(모바일 기본·4Mbps·끊김 적음) / `1080×1920`(6Mbps 고화질)
    - `OfflineAudioContext` 렌더 → 48kHz 16bit WAV (iOS 대비)
@@ -44,10 +46,10 @@
 ## 파일
 
 - `index.html`, `css/app.css`
-- `js/app.js` (UI·재생·내보내기), `js/draw.js` (Canvas 레이아웃·효과), `js/encode.js` (30fps WebCodecs 인코딩), `js/mp4-muxer.js` (내장 MP4 먹서, MIT), `js/dsp.js` (신스·WAV), `js/analyze.js` (구간 감지·BPM·MOV/MP4 오디오 디먹서), `js/arrange.js` (타임라인·컷), `js/formats.js` (포맷 프리셋), `js/yt.js`
+- `js/app.js` (UI·재생·내보내기), `js/draw.js` (Canvas 레이아웃·효과), `js/encode.js` (30fps WebCodecs 인코딩·하이브리드), `js/audio-mp4.js` (MediaRecorder 오디오 → AAC/Opus 샘플 디먹스), `js/mp4-muxer.js` (내장 MP4 먹서, MIT), `js/dsp.js` (신스·WAV), `js/analyze.js` (구간 감지·BPM·MOV/MP4 오디오 디먹서), `js/arrange.js` (타임라인·컷), `js/formats.js` (포맷 프리셋), `js/yt.js`
 - `assets/` 로고 2종 + Pretendard ExtraBold 서브셋, `manifest.json`, `sw.js`, `icons/`
 
 ## 참고
 
 - 첫 방문 후 오프라인에서도 실행됩니다(SW 캐시). 새 버전 배포 시 `sw.js`의 `VERSION`을 올리세요.
-- 미리보기는 실시간 재생, 30fps 내보내기는 길이의 약 2~6배(기기·영상에 따라) 걸립니다. WebCodecs가 없는 브라우저는 실시간(길이만큼) 녹화로 떨어집니다.
+- 미리보기는 실시간 재생, 30fps 내보내기는 길이의 약 2~6배(기기·영상에 따라) 걸립니다. iOS 17/18(iOS 하이브리드)은 소리를 실시간으로 한 번 녹음하므로 길이만큼이 더 걸립니다. WebCodecs가 없는 브라우저는 실시간(길이만큼) 녹화로 떨어집니다.
