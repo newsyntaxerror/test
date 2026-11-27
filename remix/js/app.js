@@ -1,7 +1,7 @@
 // 다인이 리믹스 스튜디오 — 앱 로직
-import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js';
-import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported } from './encode.js';
-import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.2.0';
+import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.3.0';
+import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported } from './encode.js?v=1.3.0';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.3.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
 import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js';
