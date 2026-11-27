@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css?v=1.1.0">
+<link rel="stylesheet" href="css/app.css?v=1.2.0">
 </head>
 <body>
 <div class="app">
@@ -168,16 +168,23 @@
       <div id="tlBar" class="tlbar" aria-hidden="true"></div>
       <div id="secList" class="seclist"></div>
       <div class="row gap wrap">
+        <button id="btnHighlight" class="primary sm">⚡ 바로 하이라이트</button>
         <button id="btnAddDrop" class="ghost sm">+ 드롭</button>
         <button id="btnAddBreak" class="ghost sm">+ 브레이크</button>
         <button id="btnAddIntro" class="ghost sm">+ 인트로</button>
         <button id="btnResetSec" class="ghost sm">기본 구성</button>
       </div>
+      <p class="hint">⚡ <b>바로 하이라이트</b>는 인트로를 빼고 0.0초부터 곧장 드롭(목소리·비트·줌 펀치)으로 시작해요. 총 길이는 그대로 유지되고, <b>기본 구성</b>을 누르면 인트로가 다시 생겨요.</p>
     </section>
 
     <!-- 4. 자동 편집 -->
     <section class="card" id="cardEdit">
-      <h2><b>4</b> 영상 자동 편집 <small>비트에 맞춰 컷 · 줌 펀치</small></h2>
+      <h2><b>4</b> 영상 자동 편집 <small>1배속 · 비트 컷</small></h2>
+      <div class="fitmodes" id="fitModes" role="group" aria-label="영상 맞춤 방식">
+        <button data-mode="smooth" class="primary sm on">🎬 1배속 부드럽게 맞추기</button>
+        <button data-mode="beatcut" class="ghost sm">✂️ 비트컷</button>
+      </div>
+      <p class="hint" id="fitHint"></p>
       <label class="switchrow">
         <span><b>비트 싱크 자동 컷</b><em>목소리 피크 구간으로 자동 점프컷</em></span>
         <input type="checkbox" id="autoEdit" checked>
@@ -191,26 +198,6 @@
             <option value="8">2마디 (느리게)</option>
           </select>
         </label>
-        <label class="selrow"><span>줌 펀치</span>
-          <select id="punchLevel">
-            <option value="0">끔</option>
-            <option value="0.022">약</option>
-            <option value="0.045" selected>중</option>
-            <option value="0.08">강</option>
-          </select>
-        </label>
-        <label class="selrow"><span>비트 플래시</span>
-          <select id="flashLevel">
-            <option value="0">끔</option>
-            <option value="0.05">약</option>
-            <option value="0.1" selected>중</option>
-            <option value="0.18">강</option>
-          </select>
-        </label>
-        <label class="switchrow compact">
-          <span><b>비트 펄스</b><em>배지·테두리가 박자에 반응</em></span>
-          <input type="checkbox" id="pulseOn" checked>
-        </label>
         <label class="slider">
           <span>화면 세로</span>
           <input id="fitY" type="range" min="0" max="1" step="0.01" value="0.42">
@@ -219,9 +206,64 @@
       </div>
     </section>
 
-    <!-- 5. 포맷 -->
+    <!-- 5. 영상 효과 편집 -->
+    <section class="card" id="cardFx">
+      <h2><b>5</b> 영상 효과 편집 <small>알아서 · 직접</small></h2>
+      <div class="fitmodes" id="fxModes" role="group" aria-label="효과 편집 방식">
+        <button data-fxmode="auto" class="primary sm on">✨ 알아서 편집하기</button>
+        <button data-fxmode="manual" class="ghost sm">🎛️ 직접 편집하기</button>
+      </div>
+
+      <div id="fxAutoBlock">
+        <p class="hint" id="fxAutoHint">선택한 장르·BPM에 맞춰 <b>줌 펀치·비트 플래시·컷 전환·색감</b>을 가장 자연스러운 값으로 자동 세팅해요.</p>
+        <div class="fxsummary" id="fxSummary"></div>
+        <button id="btnFxAuto" class="primary wide" style="margin-top:8px">✨ 지금 설정 그대로 적용</button>
+      </div>
+
+      <div id="fxManualBlock" hidden>
+        <label class="selrow"><span>줌 펀치</span>
+          <select id="fxPunch">
+            <option value="0">끔</option>
+            <option value="0.022">약</option>
+            <option value="0.045" selected>중</option>
+            <option value="0.08">강</option>
+          </select>
+        </label>
+        <label class="selrow"><span>비트 플래시</span>
+          <select id="fxFlash">
+            <option value="0">끔</option>
+            <option value="0.05">약</option>
+            <option value="0.1" selected>중</option>
+            <option value="0.18">강</option>
+          </select>
+        </label>
+        <label class="selrow"><span>비트 쉐이크</span>
+          <select id="fxShake">
+            <option value="0">끔</option>
+            <option value="1" selected>약</option>
+            <option value="2">강</option>
+          </select>
+        </label>
+        <label class="selrow"><span>색감 필터</span>
+          <select id="fxColor">
+            <option value="none">원본</option>
+            <option value="vivid" selected>선명하게</option>
+            <option value="warm">빈티지 웜</option>
+            <option value="neon">클럽 네온</option>
+            <option value="mono">흑백</option>
+          </select>
+        </label>
+        <label class="switchrow compact">
+          <span><b>모서리·테두리 비트 반응</b><em>박자에 맞춰 테두리가 빛나요</em></span>
+          <input type="checkbox" id="fxEdge" checked>
+        </label>
+        <p class="hint">효과는 <b>미리보기와 저장 영상 모두</b> 똑같이 들어가요. 먼저 <b>▶ 미리보기</b>로 확인해 보세요.</p>
+      </div>
+    </section>
+
+    <!-- 6. 포맷 -->
     <section class="card" id="cardFormat">
-      <h2><b>5</b> 출력 포맷 <small>기본 Ver.1 다인이네</small></h2>
+      <h2><b>6</b> 출력 포맷 <small>기본 Ver.1 다인이네</small></h2>
       <div class="formatchips" id="fmtChips"></div>
       <div class="fmtgrid">
         <label class="num"><span>배경</span><input type="color" id="fmtBg" value="#000000"></label>
@@ -252,9 +294,9 @@
       <p class="hint">내 포맷은 이 기기 브라우저(localStorage)에 저장됩니다. 제목의 <code>*단어*</code>는 형광핑크로 강조돼요.</p>
     </section>
 
-    <!-- 6. 사운드 · 제목 -->
+    <!-- 7. 사운드 · 제목 -->
     <section class="card" id="cardMix">
-      <h2><b>6</b> 사운드 · 후킹 멘트</h2>
+      <h2><b>7</b> 사운드 · 후킹 멘트</h2>
       <label class="field"><span>후킹 1줄</span><input id="title1" class="text" type="text" value="뿌애!" maxlength="40" placeholder="예: 뿌애!"></label>
       <label class="field"><span>후킹 2줄</span><input id="title2" class="text" type="text" value="*140*BPM 테크노 리믹스" maxlength="40" placeholder="예: *140*BPM 테크노 리믹스"></label>
       <div class="sliders">
@@ -265,14 +307,20 @@
       </div>
     </section>
 
-    <!-- 7. 내보내기 -->
+    <!-- 8. 내보내기 -->
     <section class="card" id="cardExport">
-      <h2><b>7</b> 내보내기</h2>
+      <h2><b>8</b> 내보내기</h2>
+      <div class="fitmodes" id="resChips" role="group" aria-label="저장 화질">
+        <button data-res="720" class="primary sm">720×1280<em>부드러운 저장 · 추천</em></button>
+        <button data-res="1080" class="ghost sm">1080×1920<em>고화질</em></button>
+      </div>
+      <p class="hint" id="resHint"></p>
       <button id="btnRender" class="primary wide">🎬 영상으로 렌더링</button>
       <div id="renderBox" hidden>
         <div class="progress"><i id="renderBar"></i></div>
         <p id="renderMsg" class="status"></p>
         <div id="outList" class="outlist"></div>
+        <p class="hint" id="saveHint" hidden>아이폰은 <b>📱 사진첩에 저장</b>을 누른 뒤 공유 시트에서 <b>'비디오 저장'</b>을 고르면 사진첩(앨범)에 바로 저장돼요.</p>
         <canvas id="thumb" class="thumb" hidden></canvas>
       </div>
       <p class="hint">영상은 실시간으로 렌더링돼요(길이만큼 걸립니다). MP4를 지원하지 않는 브라우저는 WebM으로 저장되고, 오디오는 WAV로도 받을 수 있어요.</p>
@@ -291,10 +339,10 @@
 
   <footer class="foot">
     <span>다인이네 · 리믹스 스튜디오</span>
-    <span id="verLabel">v1.1</span>
+    <span id="verLabel">v1.2</span>
   </footer>
 </div>
 <div id="toast" class="toast" hidden></div>
-<script type="module" src="js/app.js?v=1.1.0"></script>
+<script type="module" src="js/app.js?v=1.2.0"></script>
 </body>
 </html>

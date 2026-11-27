@@ -137,7 +137,8 @@ function roundRect(c, x, y, w, h, r) {
   c.closePath();
 }
 
-function drawVideoCover(c, el, box, zoom = 1, fitY = 0.42, radius = 0) {
+function drawVideoCover(c, el, box, zoom = 1, fitY = 0.42, radius = 0, opts = {}) {
+  const dx = opts.dx || 0, dy = opts.dy || 0;
   c.save();
   if (radius) { roundRect(c, box.x, box.y, box.w, box.h, radius); c.clip(); }
   else { c.beginPath(); c.rect(box.x, box.y, box.w, box.h); c.clip(); }
@@ -150,7 +151,9 @@ function drawVideoCover(c, el, box, zoom = 1, fitY = 0.42, radius = 0) {
     const sx = Math.max(0, Math.min(vw - sw, (vw - sw) / 2));
     const maxSy = Math.max(0, vh - sh);
     const sy = maxSy * Math.max(0, Math.min(1, fitY));
-    c.drawImage(el, sx, sy, sw, sh, box.x, box.y, box.w, box.h);
+    const gx = box.x + dx, gy = box.y + dy;
+    c.drawImage(el, sx, sy, sw, sh, gx, gy, box.w, box.h);
+    applyColorFx(c, el, box, sx, sy, sw, sh, gx, gy, opts.color);
   } else {
     const g = c.createLinearGradient(box.x, box.y, box.x + box.w, box.y + box.h);
     g.addColorStop(0, '#141418'); g.addColorStop(0.5, '#1d1d24'); g.addColorStop(1, '#101014');
@@ -163,6 +166,47 @@ function drawVideoCover(c, el, box, zoom = 1, fitY = 0.42, radius = 0) {
     c.fillStyle = 'rgba(255,255,255,.18)';
     c.fillText('MP4 · MOV · WebM', box.x + box.w / 2, box.y + box.h / 2 + box.h * 0.075);
     c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  }
+  c.restore();
+}
+
+// 색감 필터 — 합성 모드만 사용해서 아이폰 Safari에서도 가볍게 동작
+function applyColorFx(c, el, box, sx, sy, sw, sh, gx, gy, mode) {
+  if (!mode || mode === 'none') return;
+  c.save();
+  if (mode === 'mono') {
+    c.globalCompositeOperation = 'saturation';
+    c.fillStyle = 'hsl(0, 0%, 50%)';
+    c.fillRect(box.x, box.y, box.w, box.h);
+  } else if (mode === 'vivid') {
+    c.globalCompositeOperation = 'overlay';
+    c.globalAlpha = 0.42;
+    c.drawImage(el, sx, sy, sw, sh, gx, gy, box.w, box.h);
+    c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.03;
+    c.fillStyle = '#ffffff';
+    c.fillRect(box.x, box.y, box.w, box.h);
+  } else if (mode === 'warm') {
+    c.globalCompositeOperation = 'soft-light';
+    c.globalAlpha = 0.55;
+    c.fillStyle = '#ff9a4d';
+    c.fillRect(box.x, box.y, box.w, box.h);
+    c.globalCompositeOperation = 'multiply';
+    c.globalAlpha = 0.10;
+    c.fillStyle = '#ffe0c2';
+    c.fillRect(box.x, box.y, box.w, box.h);
+  } else if (mode === 'neon') {
+    const g = c.createLinearGradient(box.x, box.y, box.x + box.w, box.y + box.h);
+    g.addColorStop(0, '#ff2a85');
+    g.addColorStop(0.55, '#7a4dff');
+    g.addColorStop(1, '#00f5d4');
+    c.globalCompositeOperation = 'overlay';
+    c.globalAlpha = 0.38;
+    c.fillStyle = g;
+    c.fillRect(box.x, box.y, box.w, box.h);
+    c.globalCompositeOperation = 'screen';
+    c.globalAlpha = 0.10;
+    c.fillRect(box.x, box.y, box.w, box.h);
   }
   c.restore();
 }
@@ -218,6 +262,10 @@ export function drawScene(c, S) {
   const flash = S.flash || 0;
   const zoom = 1 + punch * env + (S.dropPunch || 0);
   const dark = fmt.mode !== 'cream';
+  const shake = S.shake || 0;
+  const shx = shake ? Math.sin(t * 37.7) * shake : 0;
+  const shy = shake ? Math.cos(t * 41.3) * shake : 0;
+  const zoomShake = shake ? zoom * 1.035 : zoom;
 
   const sc = S.scale || 1;
   c.save();
@@ -237,7 +285,21 @@ export function drawScene(c, S) {
   }
 
   // 영상
-  drawVideoCover(c, S.video, lay.video, zoom, S.fitY == null ? 0.42 : S.fitY, lay.radius);
+  drawVideoCover(c, S.video, lay.video, zoomShake, S.fitY == null ? 0.42 : S.fitY, lay.radius, { dx: shx, dy: shy, color: S.colorFx });
+
+  // 모서리·테두리 비트 반응
+  if (S.edgeOn && lay.video.w > 0) {
+    const accent = fmt.accent || '#FF2A85';
+    c.save();
+    c.strokeStyle = accent;
+    c.globalAlpha = 0.30 + 0.70 * env;
+    c.lineWidth = 3 + 5 * env;
+    c.shadowColor = accent;
+    c.shadowBlur = 8 + 36 * env;
+    roundRect(c, lay.video.x - 4, lay.video.y - 4, lay.video.w + 8, lay.video.h + 8, (lay.radius || 0) + 4);
+    c.stroke();
+    c.restore();
+  }
 
   // Ver.1 얇은 프레임 라인 (영상 경계를 살짝 정돈)
   if (fmt.mode === 'ver1') {

@@ -1,6 +1,6 @@
 // 다인이 리믹스 스튜디오 — 앱 로직
 import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js';
-import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.1.0';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.2.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
 import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js';
@@ -27,6 +27,10 @@ const S = {
   fmtId: 'ver1',
   fmt: cloneFormat(BUILTINS[0]),
   userFormats: [],
+  fitMode: 'smooth',    // smooth = 1배속 부드럽게(기본) · beatcut = 비트 점프컷
+  renderRes: null,      // '720' | '1080' — 모바일 기본은 720p
+  fxMode: 'auto',       // auto = 알아서 편집 · manual = 직접 편집
+  fx: { shake: 1, color: 'vivid', edge: true },
   autoEdit: true,
   cutBeats: 4,
   punch: 0.045,
@@ -69,6 +73,9 @@ class CutEngine {
     this.activeEl = null;
     this.url = null;
     this.generation = 0;
+    this.anchorIdx = -1;
+    this.anchorT = 0;
+    this.anchorSrc = 0;
   }
 
   ensureEls() {
@@ -132,10 +139,10 @@ class CutEngine {
     return this.els.find((e) => !busy.has(e)) || null;
   }
 
-  seekTo(v, time) {
+  seekTo(v, time, tol = 0.03) {
     return new Promise((resolve) => {
       const t = Math.max(0, time);
-      if (Math.abs(v.currentTime - t) < 0.03 && v.readyState >= 2) return resolve();
+      if (Math.abs(v.currentTime - t) < tol && v.readyState >= 2) return resolve();
       let done = false;
       const fin = () => { if (!done) { done = true; v.removeEventListener('seeked', fin); resolve(); } };
       v.addEventListener('seeked', fin);
@@ -190,12 +197,71 @@ class CutEngine {
     try { this.activeEl.playbackRate = 1; } catch (e) {}
   }
 
-  async startAt(t) {
+  // 샷의 특정 시각에 보여야 하는 원본 영상 위치(루프 반영)
+  shotSourceTime(shot, t) {
+    if (!shot) return 0;
+    const vDur = S.videoDur || 0;
+    if (shot.smooth && vDur > 0.05) {
+      const x = shot.srcStart + Math.max(0, t - shot.tStart);
+      return ((x % vDur) + vDur) % vDur;
+    }
+    return shot.srcStart;
+  }
+
+  // 1배속 연속 재생 구간은 매 프레임 currentTime을 강제로 다시 걸지 않는다.
+  // 샷이 시작된 실제 위치를 기준(anchor)으로, 0.25초 넘게 어긋났을 때만 살짝 보정한다.
+  follow(t) {
+    const v = this.activeEl;
+    if (!v) return;
+    const shot = this.shots[this.activeIdx];
+    if (!shot) return;
+    try { if (v.playbackRate !== 1) v.playbackRate = 1; } catch (e) {}
+    if (v.paused) { try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+    if (this.anchorIdx !== this.activeIdx) {
+      this.anchorIdx = this.activeIdx;
+      this.anchorT = t;
+      this.anchorSrc = v.currentTime;
+      return;   // 방금 시작된 샷 — 자리 잡을 시간을 준다
+    }
+    const vDur = S.videoDur || 0;
+    let exp = this.anchorSrc + (t - this.anchorT);
+    if (shot.smooth && vDur > 0.05) exp = ((exp % vDur) + vDur) % vDur;
+    const drift = Math.abs(v.currentTime - exp);
+    const wrap = shot.smooth && vDur > 0.05 ? Math.min(drift, vDur - drift) : drift;
+    if (wrap > 0.25) {
+      try { v.currentTime = exp; this.anchorT = t; this.anchorSrc = exp; } catch (e) {}
+    }
+  }
+
+  async startAt(t, autoplay = true) {
     this.pauseAll();
     this.activeIdx = -1;
     this.prepared.clear();
     await this.prime(this.indexAt(t));
-    await this.sync(t + 0.001);
+    if (autoplay) {
+      await this.sync(t + 0.001);
+    } else {
+      // 녹화 전 준비: 첫 샷을 재생 직전 상태로 대기(프리롤 동안 재생하지 않아 1배속 시작과 어긋나지 않음)
+      const idx = this.indexAt(t);
+      const v = this.prepared.get(idx);
+      if (v) {
+        this.prepared.delete(idx);
+        if (this.activeEl && this.activeEl !== v) { try { this.activeEl.pause(); } catch (e) {} }
+        this.activeEl = v;
+        this.activeIdx = idx;
+        await this.seekTo(v, this.shotSourceTime(this.shots[idx], t), 0.18);
+      }
+      this.prime(idx + 1);
+      this.prime(idx + 2);
+    }
+  }
+
+  // 녹화 시작 시점에 1배속으로 재생을 건다
+  playNow() {
+    const v = this.activeEl;
+    if (!v) return;
+    try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+    this.syncRate();
   }
 
   pauseAll() {
@@ -210,7 +276,7 @@ class CutEngine {
     if (!this.activeEl) { drawPreview(t); return; }
     if (this.activeIdx !== idx) {
       this.activeIdx = idx;
-      await this.seekTo(this.activeEl, shot.srcStart);
+      await this.seekTo(this.activeEl, this.shotSourceTime(shot, t), shot.smooth ? 0.18 : 0.03);
     }
     this.prime(idx + 1);
     this.draw();
@@ -273,6 +339,9 @@ function sceneAt(t, videoEl, opts = {}) {
     punch: S.punch,
     flash: S.flash * env,
     pulse: S.pulse,
+    shake: shakeAmp(t, env),
+    colorFx: (S.fx && S.fx.color) || 'none',
+    edgeOn: !!(S.fx && S.fx.edge),
     title1: S.title1,
     title2: S.title2,
     bpm: S.bpm,
@@ -282,6 +351,17 @@ function sceneAt(t, videoEl, opts = {}) {
     total: S.arr ? S.arr.total : 0,
     scale: opts.scale || 0.5,
   };
+}
+
+// 비트 쉐이크 진폭(1080 기준 px) — 드롭·강박에서만 흔들린다
+function shakeAmp(t, env) {
+  const lv = (S.fx && S.fx.shake) || 0;
+  if (!lv) return 0;
+  const sec = sectionAt(t);
+  const drop = !!(sec && sec.kind === 'drop');
+  const punch = dropPunchAt(t) * 8;
+  const amt = Math.min(1, Math.max(env, punch) * (drop ? 1 : 0.45));
+  return (lv === 2 ? 11 : 5.5) * amt;
 }
 
 function drawPreview(t) {
@@ -445,6 +525,7 @@ function loop() {
   if (t >= arr.total + 0.02) { stopPlayback(); return; }
   const show = Math.max(0, t);
   engine.sync(show);
+  engine.follow(show);
   const sc = sceneAt(show, engine.activeEl);
   drawScene(el.previewCtx, sc);
   el.playerTime.textContent = show.toFixed(1);
@@ -518,6 +599,8 @@ async function onVoiceFile(file) {
   const segments = detectVoice(buf);
   const vp = peakOf(buf);
   const norm = clamp(0.55 / Math.max(0.01, vp), 0.6, 8);
+  // 영상 길이를 못 읽었을 때(MediaRecorder WebM 등)는 오디오 길이를 쓴다 — 같은 영상의 소리
+  if (!S.videoDur && buf.duration > 0) { S.videoDur = buf.duration; vDur = buf.duration; }
   S.voice = { name: file.name, buffer: buf, segments, peaks: waveformPeaks(buf, 1400), duration: buf.duration, norm };
   el.voiceLoaded.hidden = false;
   el.voiceName.textContent = file.name;
@@ -545,9 +628,22 @@ function probeVideo(url) {
     v.preload = 'metadata';
     v.muted = true;
     v.src = url;
-    const done = () => resolve(isFinite(v.duration) ? v.duration : 0);
-    v.addEventListener('loadedmetadata', done, { once: true });
-    setTimeout(done, 4000);
+    let finished = false;
+    const done = (val) => {
+      if (finished) return;
+      finished = true;
+      const d = typeof val === 'number' ? val : v.duration;
+      resolve(isFinite(d) && d > 0 ? d : 0);
+    };
+    v.addEventListener('loadedmetadata', () => {
+      if (isFinite(v.duration) && v.duration > 0) return done(v.duration);
+      // MediaRecorder로 만든 WebM 등은 duration이 Infinity/NaN으로 나온다.
+      // 끝으로 한 번 시킹해 실제 길이를 받아낸 뒤 0으로 되돌린다.
+      try { v.currentTime = 1e101; } catch (e) { done(0); }
+      v.addEventListener('durationchange', () => { if (isFinite(v.duration) && v.duration > 0) { try { v.currentTime = 0; } catch (e) {} done(v.duration); } });
+      setTimeout(() => done(0), 3000);
+    }, { once: true });
+    setTimeout(() => done(0), 4000);
   });
 }
 
@@ -845,6 +941,8 @@ function saveState() {
       beatMode: S.beatMode, genre: S.genre, bpm: S.bpm,
       sections: S.sections, mix: S.mix,
       fmtId: S.fmtId, fmt: S.fmt,
+      fitMode: S.fitMode, renderRes: S.renderRes,
+      fxMode: S.fxMode, fx: S.fx,
       autoEdit: S.autoEdit, cutBeats: S.cutBeats, punch: S.punch, flash: S.flash, pulse: S.pulse, fitY: S.fitY,
       title1: S.title1, title2: S.title2, lenUnit: S.lenUnit,
       trim: S.trim, offsetBack: S.offsetBack,
@@ -876,6 +974,16 @@ function loadState() {
     if (f) { S.fmtId = f.id; S.fmt = cloneFormat(f); }
   }
   S.autoEdit = d.autoEdit !== false;
+  S.fitMode = d.fitMode === 'beatcut' ? 'beatcut' : 'smooth';   // 기본: 1배속 부드럽게
+  S.renderRes = d.renderRes === '1080' ? '1080' : d.renderRes === '720' ? '720' : null;
+  S.fxMode = d.fxMode === 'manual' ? 'manual' : 'auto';
+  if (d.fx && typeof d.fx === 'object') {
+    S.fx = {
+      shake: [0, 1, 2].includes(d.fx.shake) ? d.fx.shake : 1,
+      color: ['none', 'vivid', 'warm', 'neon', 'mono'].includes(d.fx.color) ? d.fx.color : 'vivid',
+      edge: d.fx.edge !== false,
+    };
+  }
   S.cutBeats = [1, 2, 4, 8].includes(d.cutBeats) ? d.cutBeats : 4;
   S.punch = num(d.punch, 0.045);
   S.flash = num(d.flash, 0.1);
@@ -906,6 +1014,14 @@ function pickMime() {
   return '';
 }
 
+// 저장 화질 — 720p(모바일에서 끊김 적음·추천) / 1080p(고화질)
+function renderRes() {
+  if (S.renderRes === '1080') {
+    return { w: 1080, h: 1920, scale: 1, vbps: 6000000, abps: 192000, label: '1080×1920' };
+  }
+  return { w: 720, h: 1280, scale: 2 / 3, vbps: 4000000, abps: 160000, label: '720×1280' };
+}
+
 async function renderAll() {
   if (playing) stopPlayback();
   const arr = rebuild();
@@ -914,6 +1030,7 @@ async function renderAll() {
   el.btnRender.disabled = true;
   el.renderBox.hidden = false;
   el.outList.innerHTML = '';
+  if (el.saveHint) el.saveHint.hidden = true;
   el.renderMsg.className = 'status';
   el.renderMsg.textContent = '렌더링 준비 중…';
   el.renderBar.style.width = '2%';
@@ -922,7 +1039,8 @@ async function renderAll() {
   try { await ctx.resume(); } catch (e) {}
 
   const rc = el.renderCanvas;
-  rc.width = W; rc.height = H;
+  const RES = renderRes();
+  rc.width = RES.w; rc.height = RES.h;
   const rctx = rc.getContext('2d', { alpha: false });
   const stamp = new Date();
   const name = `daini-remix_${stamp.getFullYear()}${String(stamp.getMonth() + 1).padStart(2, '0')}${String(stamp.getDate()).padStart(2, '0')}-${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}_${arr.total.toFixed(1)}s`;
@@ -939,8 +1057,8 @@ async function renderAll() {
       stream.addTrack(dest.stream.getAudioTracks()[0]);
 
       const rec = new MediaRecorder(stream, mime
-        ? { mimeType: mime, videoBitsPerSecond: 9000000, audioBitsPerSecond: 192000 }
-        : { videoBitsPerSecond: 9000000 });
+        ? { mimeType: mime, videoBitsPerSecond: RES.vbps, audioBitsPerSecond: RES.abps }
+        : { videoBitsPerSecond: RES.vbps });
       const chunks = [];
       rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
       const stopped = new Promise((r) => { rec.onstop = r; });
@@ -948,7 +1066,7 @@ async function renderAll() {
       const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
       const t0 = ctx.currentTime + 0.4;
       const mix = scheduleMix(ctx, dest, arr, t0, beatBuf);
-      await engine.startAt(0);
+      await engine.startAt(0, false);   // 프리롤: 재생 준비만, 1배속 시작은 녹화와 동시에
       el.renderMsg.textContent = `렌더링 중… 0.0 / ${arr.total.toFixed(1)}초 (실시간)`;
 
       let started = false;
@@ -956,10 +1074,11 @@ async function renderAll() {
         const step = () => {
           const t = ctx.currentTime - t0;
           if (t < 0) { requestAnimationFrame(step); return; }
-          if (!started) { started = true; try { rec.start(250); } catch (e) {} }
+          if (!started) { started = true; try { rec.start(250); } catch (e) {} engine.playNow(); }
           if (t >= arr.total + 0.01) { resolve(); return; }
           engine.sync(t);
-          drawScene(rctx, sceneAt(t, engine.activeEl, { scale: 1 }));
+          engine.follow(t);
+          drawScene(rctx, sceneAt(t, engine.activeEl, { scale: RES.scale }));
           el.renderBar.style.width = `${clamp((t / arr.total) * 100, 2, 100)}%`;
           el.renderMsg.textContent = `렌더링 중… ${t.toFixed(1)} / ${arr.total.toFixed(1)}초 (실시간)`;
           requestAnimationFrame(step);
@@ -976,7 +1095,7 @@ async function renderAll() {
       const blob = new Blob(chunks, { type: mime || 'video/webm' });
       if (blob.size > 1000) {
         const vidUrl = URL.createObjectURL(blob);
-        addOut(`영상 (${ext.toUpperCase()})`, `${(blob.size / 1048576).toFixed(1)}MB · ${arr.total.toFixed(1)}초`, vidUrl, `${name}.${ext}`);
+        addOut(`영상 (${ext.toUpperCase()})`, `${(blob.size / 1048576).toFixed(1)}MB · ${arr.total.toFixed(1)}초`, vidUrl, `${name}.${ext}`, blob, (mime || 'video/webm').split(';')[0]);
         videoDone = true;
       } else {
         el.renderMsg.className = 'status err';
@@ -985,7 +1104,8 @@ async function renderAll() {
       // 썸네일
       try {
         const img = rc.toDataURL('image/jpeg', 0.9);
-        addOut('썸네일 (JPG)', '1080×1920', URL.createObjectURL(dataURItoBlob(img)), `${name}_thumb.jpg`);
+        const thumbBlob = dataURItoBlob(img);
+        addOut('썸네일 (JPG)', `${rc.width}×${rc.height}`, URL.createObjectURL(thumbBlob), `${name}_thumb.jpg`, thumbBlob, 'image/jpeg');
       } catch (e) {}
     } catch (e) {
       console.error(e);
@@ -1024,12 +1144,85 @@ function dataURItoBlob(dataURI) {
   return new Blob([arr], { type: mime });
 }
 
-function addOut(title, meta, url, filename) {
+// ── 사진첩 저장(Web Share API) ─────────────────────────
+// iOS Safari는 <a download>로 사진첩 저장을 막지만, 클릭(사용자 제스처) 안에서
+// navigator.share({ files })를 호출하면 공유 시트의 '비디오 저장'으로 사진첩에 바로 들어간다.
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_TOUCH = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } })();
+
+function canShareFile(file) {
+  if (!navigator.share || !navigator.canShare) return false;
+  try { return !!navigator.canShare({ files: [file] }); } catch (e) { return false; }
+}
+
+// 파일을 만들기 전에 같은 형식으로 지원 여부만 확인
+function fileShareSupported(type) {
+  if (!navigator.share || !navigator.canShare || typeof File !== 'function') return false;
+  try {
+    const probe = new File([new Blob(['0'], { type })], 'probe', { type });
+    return canShareFile(probe);
+  } catch (e) { return false; }
+}
+
+function downloadUrl(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function addOut(title, meta, url, filename, blob, mime) {
   const card = document.createElement('div');
   card.className = 'outcard';
   card.innerHTML = `<div class="oc-l"><b>${title}</b><span>${meta}</span></div>
-    <a class="primary sm" download="${filename}" href="${url}">저장</a>`;
+    <div class="oc-r"></div>`;
+  const right = card.querySelector('.oc-r');
+  const type = mime || (blob && blob.type) || '';
+  const shareable = !!blob && /^(video|image)\//.test(type);
+  const supported = shareable && fileShareSupported(type);
+  const highlight = IS_IOS || IS_TOUCH; // 모바일에서는 사진첩 저장을 기본 강조
+  // 모바일에서는 공유 시트가 없어도 버튼을 보이고, 실패 시 파일 다운로드로 대체한다.
+  const showShare = shareable && (supported || highlight);
+
+  if (showShare) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = highlight ? 'primary sm' : 'ghost sm';
+    btn.textContent = '📱 사진첩에 저장';
+    btn.addEventListener('click', () => {
+      // 클릭 제스처 안에서 바로 File을 만들어야 iOS 공유 시트가 열린다(await 금지)
+      let file = null;
+      try { file = new File([blob], filename, { type }); } catch (e) {}
+      if (!file || !canShareFile(file)) {
+        downloadUrl(url, filename);
+        toast("공유 시트를 열 수 없어 파일로 저장했어요. 공유 시트에서 '비디오 저장'을 누르면 사진첩에 들어갑니다.", 4200);
+        return;
+      }
+      btn.disabled = true;
+      const done = () => { btn.disabled = false; };
+      navigator.share({ files: [file] }).then(done).catch((e) => {
+        done();
+        if (e && e.name === 'AbortError') return; // 사용자가 공유 시트를 닫음
+        downloadUrl(url, filename);
+        toast("공유 시트를 열 수 없어 파일로 저장했어요. 공유 시트에서 '비디오 저장'을 누르면 사진첩에 들어갑니다.", 4200);
+      });
+    });
+    right.appendChild(btn);
+  }
+
+  const link = document.createElement('a');
+  link.className = (showShare && !highlight) ? 'primary sm' : 'ghost sm';
+  link.download = filename;
+  link.href = url;
+  link.textContent = '파일로 저장';
+  right.appendChild(link);
+
   el.outList.appendChild(card);
+  if (showShare && el.saveHint) el.saveHint.hidden = false;
 }
 
 async function renderWav(arr) {
@@ -1094,6 +1287,128 @@ function syncBeatMode() {
   el.paneYt.hidden = S.beatMode !== 'yt';
 }
 
+// 영상 맞춤 방식(1배속 부드럽게 / 비트컷) UI
+function syncFitMode() {
+  const smooth = S.fitMode !== 'beatcut';
+  if (el.fitModes) {
+    el.fitModes.querySelectorAll('button').forEach((b) => {
+      const on = (b.dataset.mode === 'beatcut') !== smooth;
+      b.classList.toggle('on', on);
+      b.classList.toggle('primary', on && b.dataset.mode === 'smooth');
+      b.classList.toggle('ghost', !(on && b.dataset.mode === 'smooth'));
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  if (el.fitHint) {
+    el.fitHint.innerHTML = smooth
+      ? '원본 영상을 <b>1배속</b> 그대로 이어 재생해요. 영상이 짧으면 끝에서 자연스럽게 다시 이어 붙여(루프) 음원 길이에 딱 맞추고, 드롭에서는 영상 처음부터 다시 시작해 비트와 맞춰요. 슬로우모션이 생기지 않아요.'
+      : '목소리 구간을 박자마다 점프컷해요(기존 방식). 영상이 짧으면 반복 컷으로 채우고, 1배속보다 화면 전환이 잦아요.';
+  }
+  // 1배속 모드에서는 컷 설정이 필요 없어 숨김
+  if (el.autoEdit) el.autoEdit.closest('.switchrow').hidden = smooth;
+  if (el.cutBeats) el.cutBeats.closest('.selrow').hidden = smooth;
+  if (el.editOpts) el.editOpts.classList.toggle('off', false);
+}
+
+// ── 영상 효과: 알아서 편집 / 직접 편집 ──────────────────
+const FX_COLOR_LABEL = { none: '원본', vivid: '선명하게', warm: '빈티지 웜', neon: '클럽 네온', mono: '흑백' };
+
+function autoFxCfg() {
+  const presets = {
+    techno: { punch: 0.045, flash: 0.1, shake: 1, color: 'vivid', edge: true, cutBeats: 4 },
+    house: { punch: 0.035, flash: 0.08, shake: 1, color: 'warm', edge: true, cutBeats: 4 },
+    trap: { punch: 0.06, flash: 0.12, shake: 2, color: 'neon', edge: true, cutBeats: 2 },
+    lofi: { punch: 0.02, flash: 0.05, shake: 0, color: 'warm', edge: true, cutBeats: 8 },
+  };
+  const c = { ...(presets[S.genre] || presets.techno) };
+  if (S.bpm >= 150) { c.flash = Math.min(0.18, +(c.flash * 1.2).toFixed(3)); c.shake = Math.min(2, c.shake + 1); }
+  if (S.bpm <= 100) { c.flash = +(c.flash * 0.6).toFixed(3); c.shake = 0; c.cutBeats = 8; }
+  return c;
+}
+
+function applyAutoFx(silent) {
+  const c = autoFxCfg();
+  S.punch = c.punch;
+  S.flash = c.flash;
+  S.cutBeats = c.cutBeats;
+  S.fx = { ...S.fx, shake: c.shake, color: c.color, edge: c.edge };
+  syncFxControls();
+  rebuild();
+  saveState();
+  scheduleDraw();
+  if (!silent) toast('✨ 장르·BPM에 맞춰 효과를 자동으로 맞췄어요');
+}
+
+function fxSummaryText() {
+  const lv = (v, arr) => arr.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), arr[0]);
+  const punch = { 0: '끔', 0.022: '약', 0.045: '중', 0.08: '강' }[lv(S.punch, [0, 0.022, 0.045, 0.08])];
+  const flash = { 0: '끔', 0.05: '약', 0.1: '중', 0.18: '강' }[lv(S.flash, [0, 0.05, 0.1, 0.18])];
+  const shake = ['끔', '약', '강'][S.fx.shake || 0];
+  const color = FX_COLOR_LABEL[S.fx.color] || '원본';
+  return `줌 펀치 ${punch} · 플래시 ${flash} · 쉐이크 ${shake} · ${color} · 테두리 ${S.fx.edge ? 'ON' : 'OFF'}`;
+}
+
+function syncFxControls() {
+  const auto = S.fxMode !== 'manual';
+  if (!auto) {
+    // 자동값(예: 0.12)을 직접 편집 선택지 중 가장 가까운 값으로 맞춘다
+    const near = (v, arr) => arr.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), arr[0]);
+    S.punch = near(S.punch, [0, 0.022, 0.045, 0.08]);
+    S.flash = near(S.flash, [0, 0.05, 0.1, 0.18]);
+  }
+  if (el.fxPunch) el.fxPunch.value = String(S.punch);
+  if (el.fxFlash) el.fxFlash.value = String(S.flash);
+  if (el.fxShake) el.fxShake.value = String(S.fx.shake || 0);
+  if (el.fxColor) el.fxColor.value = S.fx.color || 'none';
+  if (el.fxEdge) el.fxEdge.checked = !!S.fx.edge;
+  if (el.fxSummary) el.fxSummary.textContent = fxSummaryText();
+  if (el.fxModes) {
+    el.fxModes.querySelectorAll('button').forEach((b) => {
+      const on = (b.dataset.fxmode === 'manual') !== auto;
+      b.classList.toggle('on', on);
+      b.classList.toggle('primary', on && b.dataset.fxmode === 'auto');
+      b.classList.toggle('ghost', !(on && b.dataset.fxmode === 'auto'));
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  if (el.fxAutoBlock) el.fxAutoBlock.hidden = !auto;
+  if (el.fxManualBlock) el.fxManualBlock.hidden = auto;
+}
+
+// 저장 화질 UI
+function syncRes() {
+  if (el.resChips) {
+    const cur = S.renderRes === '1080' ? '1080' : '720';
+    el.resChips.querySelectorAll('button').forEach((b) => {
+      const on = b.dataset.res === cur;
+      b.classList.toggle('on', on);
+      b.classList.toggle('primary', on);
+      b.classList.toggle('ghost', !on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  if (el.resHint) {
+    const cur = S.renderRes === '1080' ? '1080' : '720';
+    el.resHint.innerHTML = cur === '720'
+      ? '아이폰에서 <b>끊기지 않고 부드럽게</b> 저장되는 화질이에요(720×1280 · 4Mbps). 화질이 아쉬울 때만 1080×1920으로 올려 보세요.'
+      : '<b>1080×1920 고화질</b>(6Mbps)이에요. 기기가 느리면 프레임이 끊기거나 렌더가 버벅일 수 있어요.';
+  }
+}
+
+// ⚡ 인트로 없이 바로 하이라이트: 인트로를 빼고 그 길이를 첫 드롭에 더해 총 길이 유지
+function applyHighlightStart() {
+  const intros = S.sections.filter((s) => s.kind === 'intro');
+  if (!intros.length) { toast('이미 인트로 없이 바로 드롭으로 시작해요'); return; }
+  if (playing) stopPlayback();
+  const lost = intros.reduce((a, s) => a + Math.max(0, s.beats || 0), 0);
+  S.sections = S.sections.filter((s) => s.kind !== 'intro');
+  if (!S.sections.length) S.sections = defaultSections().filter((s) => s.kind !== 'intro');
+  const firstDrop = S.sections.find((s) => s.kind === 'drop') || S.sections[0];
+  if (firstDrop) firstDrop.beats = Math.min(128, (firstDrop.beats || 0) + lost);
+  rebuild(); saveState();
+  toast('⚡ 인트로 없이 0.0초부터 바로 하이라이트로 시작해요');
+}
+
 function syncControls() {
   el.genreChips.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.genre === S.genre));
   el.bpm.value = String(S.bpm);
@@ -1111,11 +1426,11 @@ function syncControls() {
   el.autoEdit.checked = S.autoEdit;
   el.editOpts.classList.toggle('off', !S.autoEdit);
   el.cutBeats.value = String(S.cutBeats);
-  el.punchLevel.value = String(S.punch);
-  el.flashLevel.value = String(S.flash);
-  el.pulseOn.checked = S.pulse;
   el.fitY.value = String(S.fitY);
   el.fitYOut.textContent = `${Math.round(S.fitY * 100)}%`;
+  syncFitMode();
+  syncRes();
+  syncFxControls();
   el.lenUnit.dataset.unit = S.lenUnit;
   syncBeatMode();
   syncFormatInputs();
@@ -1218,6 +1533,7 @@ function bind() {
       fitAutoTitles();
     }
     el.genreChips.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    if (S.fxMode === 'auto') applyAutoFx(true);
     rebuild();
     saveState();
   });
@@ -1225,6 +1541,7 @@ function bind() {
     S.bpm = +el.bpm.value;
     S.bpmLocked = true;
     el.bpmOut.textContent = String(S.bpm);
+    if (S.fxMode === 'auto') applyAutoFx(true);
     fitAutoTitles();
     rebuild();
   });
@@ -1345,7 +1662,52 @@ function bind() {
   el.btnAddDrop.addEventListener('click', () => { S.sections.push(newSection('drop', 16)); rebuild(); saveState(); });
   el.btnAddBreak.addEventListener('click', () => { S.sections.push(newSection('break', 8, { beat: false })); rebuild(); saveState(); });
   el.btnAddIntro.addEventListener('click', () => { S.sections.push(newSection('intro', 8, { voice: false })); rebuild(); saveState(); });
+  el.btnHighlight.addEventListener('click', applyHighlightStart);
   el.btnResetSec.addEventListener('click', () => { S.sections = defaultSections(); rebuild(); saveState(); toast('기본 구성으로 돌아왔어요'); });
+
+  // 영상 맞춤 방식
+  if (el.fitModes) {
+    el.fitModes.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b || !b.dataset.mode) return;
+      S.fitMode = b.dataset.mode === 'beatcut' ? 'beatcut' : 'smooth';
+      syncFitMode(); rebuild(); saveState();
+      toast(S.fitMode === 'smooth' ? '🎬 1배속 부드럽게로 맞췄어요' : '✂️ 비트컷으로 바꿨어요');
+    });
+  }
+
+  // 저장 화질
+  if (el.resChips) {
+    el.resChips.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b || !b.dataset.res) return;
+      S.renderRes = b.dataset.res === '1080' ? '1080' : '720';
+      syncRes(); saveState();
+      toast(S.renderRes === '720' ? '720×1280 · 부드러운 저장' : '1080×1920 · 고화질');
+    });
+  }
+
+  // 영상 효과: 알아서 / 직접
+  if (el.fxModes) {
+    el.fxModes.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b || !b.dataset.fxmode) return;
+      S.fxMode = b.dataset.fxmode === 'manual' ? 'manual' : 'auto';
+      if (S.fxMode === 'auto') applyAutoFx(true);
+      syncFxControls(); saveState(); scheduleDraw();
+      toast(S.fxMode === 'auto' ? '✨ 알아서 편집으로 맞췄어요' : '🎛️ 직접 편집 — 효과를 골라 보세요');
+    });
+  }
+  if (el.btnFxAuto) el.btnFxAuto.addEventListener('click', () => applyAutoFx());
+  const manualFx = () => {
+    S.fxMode = 'manual';
+    syncFxControls(); saveState(); scheduleDraw();
+  };
+  if (el.fxPunch) el.fxPunch.addEventListener('change', () => { S.punch = +el.fxPunch.value; manualFx(); });
+  if (el.fxFlash) el.fxFlash.addEventListener('change', () => { S.flash = +el.fxFlash.value; manualFx(); });
+  if (el.fxShake) el.fxShake.addEventListener('change', () => { S.fx.shake = +el.fxShake.value; manualFx(); });
+  if (el.fxColor) el.fxColor.addEventListener('change', () => { S.fx.color = el.fxColor.value; manualFx(); });
+  if (el.fxEdge) el.fxEdge.addEventListener('change', () => { S.fx.edge = el.fxEdge.checked; S.pulse = el.fxEdge.checked; manualFx(); });
 
   // 자동 편집
   el.autoEdit.addEventListener('change', () => {
@@ -1354,9 +1716,8 @@ function bind() {
     rebuild(); saveState();
   });
   el.cutBeats.addEventListener('change', () => { S.cutBeats = +el.cutBeats.value; rebuild(); saveState(); });
-  el.punchLevel.addEventListener('change', () => { S.punch = +el.punchLevel.value; saveState(); scheduleDraw(); });
-  el.flashLevel.addEventListener('change', () => { S.flash = +el.flashLevel.value; saveState(); scheduleDraw(); });
-  el.pulseOn.addEventListener('change', () => { S.pulse = el.pulseOn.checked; saveState(); scheduleDraw(); });
+  el.punchLevel && 0;
+
   el.fitY.addEventListener('input', () => {
     S.fitY = +el.fitY.value;
     el.fitYOut.textContent = `${Math.round(S.fitY * 100)}%`;
@@ -1438,8 +1799,12 @@ function cacheEls() {
     lenPresets: 'lenPresets', lenCustom: 'lenCustom', lenUnit: 'lenUnit', lenUnitLabel: 'lenUnitLabel', btnFit: 'btnFit',
     totalLen2: 'totalLen2', totalBars: 'totalBars', cutCount: 'cutCount', bpmLabel: 'bpmLabel', tlBar: 'tlBar',
     secList: 'secList', btnAddDrop: 'btnAddDrop', btnAddBreak: 'btnAddBreak', btnAddIntro: 'btnAddIntro', btnResetSec: 'btnResetSec',
-    autoEdit: 'autoEdit', editOpts: 'editOpts', cutBeats: 'cutBeats', punchLevel: 'punchLevel', flashLevel: 'flashLevel',
-    pulseOn: 'pulseOn', fitY: 'fitY', fitYOut: 'fitYOut',
+    autoEdit: 'autoEdit', editOpts: 'editOpts', cutBeats: 'cutBeats',
+    fxModes: 'fxModes', fxAutoBlock: 'fxAutoBlock', fxManualBlock: 'fxManualBlock',
+    fxSummary: 'fxSummary', btnFxAuto: 'btnFxAuto', fxPunch: 'fxPunch', fxFlash: 'fxFlash',
+    fxShake: 'fxShake', fxColor: 'fxColor', fxEdge: 'fxEdge',
+    fitModes: 'fitModes', fitHint: 'fitHint', btnHighlight: 'btnHighlight',
+    fitY: 'fitY', fitYOut: 'fitYOut',
     fmtChips: 'fmtChips', fmtBg: 'fmtBg', fmtAccent: 'fmtAccent', fmtFont: 'fmtFont', fmtFontOut: 'fmtFontOut',
     badgeLogo: 'badgeLogo', badgeText: 'badgeText', dropLogo: 'dropLogo', fileLogo: 'fileLogo',
     btnSaveFmt: 'btnSaveFmt', btnDelFmt: 'btnDelFmt',
@@ -1447,7 +1812,8 @@ function cacheEls() {
     voiceVol: 'voiceVol', voiceVolOut: 'voiceVolOut', beatVol: 'beatVol', beatVolOut: 'beatVolOut',
     reverb: 'reverb', reverbOut: 'reverbOut', pitch: 'pitch', pitchOut: 'pitchOut',
     btnRender: 'btnRender', renderBox: 'renderBox', renderBar: 'renderBar', renderMsg: 'renderMsg',
-    outList: 'outList', thumb: 'thumb', btnHelp: 'btnHelp', toast: 'toast',
+    resChips: 'resChips', resHint: 'resHint',
+    outList: 'outList', saveHint: 'saveHint', thumb: 'thumb', btnHelp: 'btnHelp', toast: 'toast',
   };
   for (const k in map) el[k] = document.getElementById(map[k]);
 }
@@ -1472,6 +1838,8 @@ function shrinkImage(file, size) {
 
 async function init() {
   cacheEls();
+  // 화질 기본값: 아이폰·모바일은 720p(끊김 적음), 넓은 화면은 1080p
+  S.renderRes = S.renderRes || ((IS_IOS || IS_TOUCH) ? '720' : '1080');
   el.preview.width = 540;
   el.preview.height = 960;
   el.previewCtx = el.preview.getContext('2d', { alpha: false });

@@ -151,6 +151,14 @@ button { font-family: inherit; cursor: pointer; }
 .dim { color: var(--dim2); }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { margin: 8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dim2); }
+.hint b { color: var(--txt); }
+.fitmodes { display: flex; gap: 6px; margin: 2px 0 4px; }
+.fitmodes button { flex: 1 1 0; padding: 11px 8px; font-size: 12.5px; white-space: nowrap; }
+.fitmodes button.on { box-shadow: 0 8px 22px rgba(255, 42, 133, .32); }
+.fitmodes button.ghost.on { border-color: rgba(255, 42, 133, .55); color: var(--pink); background: rgba(255, 42, 133, .1); }
+.fitmodes button em { display: block; font-style: normal; font-size: 10px; font-weight: 500; opacity: .75; margin-top: 2px; }
+.hidden, .switchrow[hidden], .selrow[hidden] { display: none !important; }
+.fxsummary { margin-top: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, .03); font-size: 11.5px; line-height: 1.55; color: var(--dim); }
 .hint code { background: rgba(255, 255, 255, .07); padding: 1px 4px; border-radius: 4px; font-size: 11px; }
 
 .text {
@@ -353,7 +361,13 @@ input[type="checkbox"].big, .switchrow input[type="checkbox"] {
 .outcard { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: rgba(255, 255, 255, .03); }
 .outcard .oc-l b { display: block; font-size: 13px; }
 .outcard .oc-l span { font-size: 11px; color: var(--dim2); }
-.outcard a { text-decoration: none; }
+.outcard a { text-decoration: none; text-align: center; }
+.outcard .oc-r { display: flex; flex-direction: column; gap: 6px; align-items: stretch; flex: 0 0 auto; }
+.outcard .oc-r .primary.sm, .outcard .oc-r .ghost.sm { white-space: nowrap; text-align: center; }
+@media (max-width: 360px) {
+  .outcard { flex-direction: column; align-items: stretch; }
+  .outcard .oc-r { flex-direction: column; }
+}
 .thumb { width: auto; max-width: 190px; max-height: 338px; border-radius: 12px; margin: 12px auto 0; display: block; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 
 .foot { display: flex; justify-content: space-between; padding: 18px 18px 0; font-size: 11px; color: var(--dim2); }

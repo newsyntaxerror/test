@@ -38,11 +38,12 @@ export function labelFor(sections, index) {
 }
 
 // sections(마디 beats) → 실제 초 타임라인
+// beats가 0 이하인 구간(예: 인트로 없이 바로 하이라이트)은 타임라인에서 길이 0으로 둔다.
 export function layoutSections(sections, bpm) {
   const beat = 60 / bpm;
   let t = 0;
   return sections.map((s, i) => {
-    const dur = Math.max(0.5, s.beats) * beat;
+    const dur = s.beats <= 0 ? 0 : Math.max(0.5, s.beats) * beat;
     const o = { ...s, index: i, start: +t.toFixed(4), dur: +dur.toFixed(4), end: +(t + dur).toFixed(4), label: labelFor(sections, i) };
     t += dur;
     return o;
@@ -50,7 +51,7 @@ export function layoutSections(sections, bpm) {
 }
 
 export function totalBeats(sections) {
-  return sections.reduce((a, s) => a + Math.max(0.5, s.beats), 0);
+  return sections.reduce((a, s) => a + (s.beats > 0 ? Math.max(0.5, s.beats) : 0), 0);
 }
 
 // 목표 길이(초)에 맞춰 구간 길이를 비율 배분 (마디=4박 단위, 짧으면 2박 단위)
@@ -121,7 +122,11 @@ export function buildArrangement(S) {
   // ── 자동 비트싱크 영상 컷 ────────────────────────────
   const shots = [];
   const vDur = Math.max(0.2, S.videoDur || 0);
-  if (!S.autoEdit) {
+  const fitMode = S.fitMode === 'beatcut' ? 'beatcut' : 'smooth';
+  if (fitMode === 'smooth') {
+    // 1배속 부드럽게: 원본 속도(1.0x) 그대로 이어 재생하고, 모자란 길이는 자연 루프로 채운다.
+    shots.push(...buildSmoothShots(sections, total, vDur));
+  } else if (!S.autoEdit) {
     shots.push({ tStart: 0, tEnd: total, srcStart: 0, continuous: true });
   } else {
     const pool = (S.voice && S.voice.segments ? S.voice.segments : [])
@@ -154,10 +159,42 @@ export function buildArrangement(S) {
   }
 
   return {
-    bpm, beat, bar, total, sections, voiceEvents, shots,
+    bpm, beat, bar, total, sections, voiceEvents, shots, fitMode,
     beatPlan: sections.map((s) => ({ start: s.start, dur: s.dur, kind: s.kind, beatOn: !!s.beat })),
     cutCount: shots.filter((s) => !s.continuous).length,
   };
+}
+
+// 1배속 연속 재생 샷 — 원본을 1.0x로 죽 이어 재생하고, 영상이 짧으면
+// 엘리먼트 루프로 처음부터 자연스럽게 다시 이어진다(슬로우모션 없음).
+// 드롭에 들어갈 때만 시작점을 0으로 되돌려 비트에 맞춘다(1배속 유지).
+function buildSmoothShots(sections, total, vDur) {
+  const shots = [];
+  if (!(total > 0.05) || !(vDur > 0.05)) return shots;
+  let runStart = 0;
+  let runSrc = 0;
+  const flush = (endT) => {
+    if (endT - runStart > 0.06) {
+      shots.push({
+        tStart: +runStart.toFixed(4),
+        tEnd: +endT.toFixed(4),
+        srcStart: +runSrc.toFixed(3),
+        continuous: true,
+        smooth: true,
+      });
+    }
+  };
+  for (let i = 0; i < sections.length; i++) {
+    const sec = sections[i];
+    if (sec.dur <= 0.02) continue;
+    if (i > 0 && sec.kind === 'drop' && sec.start > 0.02) {
+      flush(sec.start);   // 직전까지 1배속으로 재생한 뒤
+      runStart = sec.start;
+      runSrc = 0;         // 드롭은 영상 처음부터 (비트에 맞춘 재시작)
+    }
+  }
+  flush(total);
+  return shots;
 }
 
 function permute(n, seed) {
