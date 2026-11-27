@@ -293,6 +293,86 @@
     return added;
   }
 
+  /* ── v8 — 완전히 빈 서버에 처음 연결할 때의 초기화 ───────────
+     Supabase office_* 표를 새로 만들어 처음 연결하면 서버가 0건이라
+     pull() 이 빈 배열로 로컬을 덮어써 '작업실 0 · 빈 회의실'이 되었습니다.
+     이 방의 카드·메모·대화가 모두 0건인 '완전 빈 서버'일 때는 빈 배열로
+     덮어쓰지 않고, 지금 이 기기의 데이터(기기 데이터도 비었으면 기본 시드)
+     를 서버에 한 번 올려 초기 상태를 만듭니다.
+
+     · 한 번 올라간 뒤에는 대화(안내 메시지)가 서버에 남으므로 다시 시드하지
+       않습니다. 사용자가 카드·메모를 모두 지운 상태와 구분됩니다.
+     · 올리는 순서는 카드 → 메모 → 멤버 → 대화입니다. 대화가 마지막에 올라가야
+       중간에 실패해도 '대화 0건'이 유지되어 다음 동기화에서 다시 시도합니다.
+     · 여러 기기가 동시에 처음 열려도 시드 카드·메모는 id 가 고정이라 같은 행을
+       덮어쓸 뿐 중복으로 생기지 않습니다. */
+  const BOOTSTRAP_MESSAGE_ID = 'seed-v8-welcome';
+  let bootstrapping = false;
+  let bootstrapDone = false;
+
+  function bootstrapMessage() {
+    return {
+      id: BOOTSTRAP_MESSAGE_ID,
+      channel: 'general',
+      authorId: 'boknim',
+      authorName: '복님이',
+      authorKind: 'pickle',
+      body: '대장님, 「달콩 비서실」을 Supabase 실시간 서버에 연결했습니다 🥒\n' +
+            '작업실 카드와 메모가 서버에 한 번 올라갔고, 이제 폰·PC 어느 기기에서 열어도 같은 비서실이 보입니다.\n\n' +
+            '· 작업실 — 진행 중 프로젝트 4종(에디토 · 우리끼리 v23 · 다인이네 숏츠 · 데일리 트렌드 뷰어) 인수인계 카드\n' +
+            '· 메모 — 🤝 바통터치 사용법, 진행 중 프로젝트 4종 목록\n' +
+            '· 카드를 누르면 「🤝 인수인계 상세」에서 저장소·라이브 URL, 한 일, 이어서 할 일을 볼 수 있어요.\n' +
+            '· 한 번 올라간 데이터는 스스로 다시 채우지 않습니다. 카드·메모는 직접 지우거나 고치면 그대로 서버에 반영됩니다.',
+      kind: 'chat',
+      meta: { v: '8' },
+      createdAt: nowISO(),
+    };
+  }
+
+  /* 시드로 올릴 내용을 준비합니다. 기기 데이터가 통째로 비어 있으면 기본 시드로 되살립니다. */
+  function ensureBootstrapContent() {
+    let changed = false;
+    if (!state.tasks.length && !state.memos.length && !state.messages.length) {
+      mergeSeed();          // 기본 인수인계 카드 4종 + 메모 2장 (id 고정)
+      changed = true;
+    }
+    if (!state.messages.length) { state.messages.push(bootstrapMessage()); changed = true; }
+    if (changed) persist();
+  }
+
+  async function pushRows(table, rows) {
+    if (!rows.length) return;
+    for (let i = 0; i < rows.length; i += 100) {
+      const res = await client.from(table).upsert(rows.slice(i, i + 100), { onConflict: 'id' });
+      if (res && res.error) throw res.error;
+    }
+  }
+
+  async function pushAll() {
+    if (bootstrapDone || bootstrapping || sync.mode !== 'live' || !client) return false;
+    bootstrapping = true;
+    try {
+      ensureBootstrapContent();
+      // 카드 → 메모 → 멤버 → 대화. 대화를 마지막에 올려 도중 실패 시 다시 시도할 수 있게 합니다.
+      await pushRows('office_tasks', state.tasks.map(taskToRow));
+      await pushRows('office_memos', state.memos.map(memoToRow));
+      await pushRows('office_members', state.members.map(memberToRow));
+      await pushRows('office_messages', state.messages.map(messageToRow));
+      bootstrapDone = true;
+      sync.seededAt = Date.now();
+      console.info('[office] 빈 서버에 초기 데이터를 올렸습니다 — 카드 ' + state.tasks.length +
+        '장 · 메모 ' + state.memos.length + '장 · 대화 ' + state.messages.length + '건');
+      return true;
+    } catch (e) {
+      // 실패하면 대기열에 넣어 다음 폴링에서 이어서 올립니다.
+      state.tasks.forEach((t) => queueUpsert('office_tasks', taskToRow(t), t.id));
+      state.memos.forEach((m) => queueUpsert('office_memos', memoToRow(m), m.id));
+      state.messages.forEach((m) => queueUpsert('office_messages', messageToRow(m), m.id));
+      console.warn('[office] 초기 데이터 업로드 실패 — 다시 시도합니다', (e && (e.message || e.details)) || e);
+      return false;
+    } finally { bootstrapping = false; }
+  }
+
   function normalizeMember(m) {
     return {
       id: m.id, emoji: m.emoji || '🙂', name: m.name || '비서', role: m.role || '',
@@ -513,6 +593,26 @@
         client.from('office_members').select('*').eq('room', roomCode).order('sort', { ascending: true }),
       ]);
       if (msgRes.error) throw msgRes.error;
+
+      /* v8 — 이 방의 카드·메모·대화가 모두 0건인 완전 빈 서버면,
+         빈 배열로 로컬을 덮어쓰지 않고 로컬(없으면 기본 시드)을 서버에 올립니다. */
+      const remoteEmpty = !(msgRes.data || []).length
+        && !(taskRes.error ? [] : (taskRes.data || [])).length
+        && !(memoRes.error ? [] : (memoRes.data || [])).length;
+      if (remoteEmpty && !bootstrapDone) {
+        // 카드·메모 조회가 실패했다면 '빈 서버'로 단정하지 않고 다음 동기화로 미룹니다.
+        if (taskRes.error) throw taskRes.error;
+        if (memoRes.error) throw memoRes.error;
+        const seeded = await pushAll();
+        sync.lastSyncAt = Date.now();
+        if (seeded) {
+          emit('sync-seed');
+          schedulePull();          // 올린 데이터를 서버에서 다시 읽어 화면과 맞춥니다.
+          return;
+        }
+        emit('sync-tick');
+        return;                    // 업로드 실패 시 로컬은 그대로 두고 다음 폴링에서 다시 시도
+      }
 
       let dirty = false;
 
