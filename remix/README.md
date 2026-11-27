@@ -9,6 +9,7 @@
 
 1. **영상 → 목소리 자동 추출**
    - MP4/MOV/WebM(또는 오디오) 업로드 → `decodeAudioData`로 디코딩
+   - **아이폰 기본 동영상(.mov QuickTime, H.264/HEVC + AAC) 지원(v1.1)**: `decodeAudioData`가 실패하면 `js/analyze.js`의 순수 JS ISO BMFF 디먹서가 `moov→trak→mdia→hdlr('soun')→minf→stbl`(stsd/esds·stsc·stsz·stco/co64)을 해석해 오디오만 뽑아냅니다. AAC는 ADTS 헤더(또는 최소 MP4 재포장)로, `lpcm/sowt/twos`는 WAV로 디코딩하고, `File.slice()`로 샘플 구간만 읽어 100MB+ 영상도 가볍게 처리합니다.
    - 프리엠퍼시스 에너지 피크 감지로 최대 12개 구간 자동 슬라이스
    - 구간별 미리듣기 · 사용 on/off · 시작점 50ms 미세조정, 균등 분할 백업
 2. **배경 비트 3가지 소스**
@@ -34,7 +35,7 @@
 ## 파일
 
 - `index.html`, `css/app.css`
-- `js/app.js` (UI·재생·내보내기), `js/draw.js` (Canvas 레이아웃), `js/dsp.js` (신스·WAV), `js/analyze.js` (구간 감지·BPM), `js/arrange.js` (타임라인·컷), `js/formats.js` (포맷 프리셋), `js/yt.js`
+- `js/app.js` (UI·재생·내보내기), `js/draw.js` (Canvas 레이아웃), `js/dsp.js` (신스·WAV), `js/analyze.js` (구간 감지·BPM·MOV/MP4 오디오 디먹서), `js/arrange.js` (타임라인·컷), `js/formats.js` (포맷 프리셋), `js/yt.js`
 - `assets/` 로고 2종 + Pretendard ExtraBold 서브셋, `manifest.json`, `sw.js`, `icons/`
 
 ## 참고

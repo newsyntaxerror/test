@@ -1,13 +1,13 @@
 /* 다인이 리믹스 스튜디오 — 오프라인 앱 셸 */
-const VERSION = 'remix-v1.0.2';
+const VERSION = 'remix-v1.1.0';
 const ASSETS = [
   './',
   './index.html',
-  './css/app.css',
-  './js/app.js',
+  './css/app.css?v=1.1.0',
+  './js/app.js?v=1.1.0',
+  './js/analyze.js?v=1.1.0',
   './js/draw.js',
   './js/dsp.js',
-  './js/analyze.js',
   './js/arrange.js',
   './js/formats.js',
   './js/yt.js',
@@ -21,7 +21,17 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const cache = await caches.open(VERSION);
+    // HTTP 캐시를 건너뛰고 새 파일을 받아 둔다(버전 올릴 때 옛 파일이 남지 않게)
+    await Promise.all(ASSETS.map(async (url) => {
+      try {
+        const res = await fetch(url, { cache: 'reload' });
+        if (res && res.ok) await cache.put(url, res);
+      } catch (err) { /* 오프라인 설치 시도 등은 무시 */ }
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {

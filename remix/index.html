@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css?v=1.1.0">
 </head>
 <body>
 <div class="app">
@@ -52,10 +52,10 @@
     <section class="card" id="cardVoice">
       <h2><b>1</b> 내 영상 <small>다인이/아기 영상 · 목소리 자동 추출</small></h2>
       <label class="drop" id="dropVoice">
-        <input type="file" id="fileVoice" accept="video/*,audio/*">
+        <input type="file" id="fileVoice" accept="video/*,video/quicktime,.mov,.mp4,.m4v,audio/*,.m4a,.mp3,.wav">
         <span class="drop-ico">🎬</span>
         <span class="drop-t">영상 올리기</span>
-        <span class="drop-s">MP4 · MOV · WebM · MP3 · M4A</span>
+        <span class="drop-s">아이폰 MOV · MP4 · WebM · MP3 · M4A</span>
       </label>
       <div id="voiceLoaded" hidden>
         <div class="filemeta">
@@ -101,7 +101,7 @@
 
       <div class="tabpane" id="pane-file" hidden>
         <label class="drop sm" id="dropBack">
-          <input type="file" id="fileBack" accept="audio/*,video/*">
+          <input type="file" id="fileBack" accept="video/*,video/quicktime,.mov,.mp4,.m4v,audio/*,.m4a,.mp3,.wav">
           <span class="drop-ico">🎵</span>
           <span class="drop-t">음원 · 화면녹화 영상 올리기</span>
           <span class="drop-s">MP3 · M4A · WAV · MP4 · MOV (영상이면 오디오만 자동 추출)</span>
@@ -291,10 +291,10 @@
 
   <footer class="foot">
     <span>다인이네 · 리믹스 스튜디오</span>
-    <span id="verLabel">v1.0</span>
+    <span id="verLabel">v1.1</span>
   </footer>
 </div>
 <div id="toast" class="toast" hidden></div>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/app.js?v=1.1.0"></script>
 </body>
 </html>

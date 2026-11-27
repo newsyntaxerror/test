@@ -1,6 +1,6 @@
 // 다인이 리믹스 스튜디오 — 앱 로직
 import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js';
-import { decodeMedia, detectVoice, estimateBpm, waveformPeaks } from './analyze.js';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.1.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
 import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js';
@@ -416,7 +416,7 @@ function scheduleMix(ctx, out, arr, t0, beatBuf) {
 // 미리보기 재생
 async function play() {
   if (playing) { stopPlayback(); return; }
-  if (!S.voice && !(S.beatMode === 'file' && S.backing)) {
+  if (!S.voice && !S.videoUrl && !(S.beatMode === 'file' && S.backing)) {
     toast('먼저 다인 영상을 올려 주세요');
     return;
   }
@@ -491,21 +491,26 @@ async function onVoiceFile(file) {
   const ctx = audioCtx();
   let buf = null, err = null;
   try {
-    const ab = await file.arrayBuffer();
-    buf = await decodeMedia(ctx, ab);
+    buf = await decodeMediaFile(ctx, file, (p, msg) => { if (msg) setStatus(msg); });
   } catch (e) { err = e; }
 
   if (!buf) {
     S.voice = null;
+    const why = (err && (err.userMessage || err.message)) || '오디오를 읽지 못했어요';
     el.voiceLoaded.hidden = false;
     el.voiceName.textContent = file.name;
     el.voiceDur.textContent = vDur ? `${vDur.toFixed(1)}초 영상 · 오디오 없음` : '오디오 없음';
     el.segList.innerHTML = '';
     el.segCount.textContent = '0';
     el.segOn.textContent = '0';
+    try {
+      const c = el.waveVoice.getContext('2d');
+      c.clearRect(0, 0, el.waveVoice.width, el.waveVoice.height);
+    } catch (e) {}
+    el.segHint.textContent = `${why} · 영상은 그대로 미리보기와 렌더링에 쓸 수 있어요. 소리까지 살리려면 MP4로 변환하거나 아이폰 설정 → 카메라 → 포맷 → '호환성 우선'으로 다시 찍어 올려 주세요.`;
     el.segHint.hidden = false;
-    toast('오디오를 읽지 못했어요. 다른 형식(MP4/M4A)으로 저장해 보세요.');
-    setStatus('오디오 없음 · 반주만 사용할 수 있어요');
+    toast(why, 3600);
+    setStatus(`오디오 없음 · ${why}`);
     rebuild();
     return;
   }
@@ -627,8 +632,7 @@ async function onBackFile(file) {
   setStatus('음원을 분석하는 중…');
   const ctx = audioCtx();
   try {
-    const ab = await file.arrayBuffer();
-    const buf = await decodeMedia(ctx, ab);
+    const buf = await decodeMediaFile(ctx, file, (p, msg) => { if (msg) setStatus(msg); });
     S.backing = { name: file.name, buffer: buf, peaks: waveformPeaks(buf, 1400), duration: buf.duration, norm: clamp(0.6 / Math.max(0.01, peakOf(buf)), 0.5, 6) };
     S.trim = { start: 0, end: Math.min(buf.duration, 30) };
     S.offsetBack = 0;
@@ -654,8 +658,9 @@ async function onBackFile(file) {
     setStatus(`${file.name} · ${buf.duration.toFixed(1)}초${est ? ` · 추정 ${est.bpm} BPM` : ''}`);
     toast('음원을 불러왔어요. 쓸 구간을 골라 주세요');
   } catch (e) {
-    toast('이 파일의 오디오를 읽지 못했어요 (MP3/M4A/WAV 권장)');
-    setStatus('음원을 읽지 못했어요');
+    const why = (e && (e.userMessage || e.message)) || '이 파일의 오디오를 읽지 못했어요 (MP3/M4A/WAV 권장)';
+    toast(why, 3400);
+    setStatus(`음원을 읽지 못했어요 · ${why}`);
   }
 }
 
@@ -905,7 +910,7 @@ async function renderAll() {
   if (playing) stopPlayback();
   const arr = rebuild();
   if (!arr.total) return;
-  if (!S.voice && !(S.beatMode === 'file' && S.backing)) { toast('먼저 영상을 올려 주세요'); return; }
+  if (!S.voice && !S.videoUrl && !(S.beatMode === 'file' && S.backing)) { toast('먼저 영상을 올려 주세요'); return; }
   el.btnRender.disabled = true;
   el.renderBox.hidden = false;
   el.outList.innerHTML = '';
