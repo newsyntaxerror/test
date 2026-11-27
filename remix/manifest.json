@@ -1,0 +1,18 @@
+{
+  "name": "다인이 리믹스 스튜디오",
+  "short_name": "리믹스",
+  "description": "다인 영상의 목소리를 자동 추출해 비트에 맞춰 컷 편집·리믹스하는 스튜디오",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08080a",
+  "theme_color": "#08080a",
+  "categories": ["video", "music", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

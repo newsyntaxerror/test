@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>다인이 리믹스 스튜디오</title>
+<meta name="description" content="다인 영상 목소리를 비트에 맞춰 자동 컷 편집하는 모바일 리믹스 스튜디오">
+<meta name="theme-color" content="#0B0B0D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="리믹스">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🎧</span>
+      <div>
+        <h1>다인이 리믹스 스튜디오</h1>
+        <p id="subStatus">영상 → 목소리 자동 추출 → 비트 리믹스</p>
+      </div>
+    </div>
+    <button id="btnHelp" class="ghost icon" aria-label="도움말">?</button>
+  </header>
+
+  <section class="stage" id="stage">
+    <div class="stage-inner">
+      <canvas id="preview" aria-label="미리보기"></canvas>
+    </div>
+    <div class="stage-hud">
+      <div class="hud-left">
+        <span class="dot" id="playDot"></span>
+        <span id="playerTime">0.0</span><span class="dim">/</span><span id="totalLen">0.0</span><span class="dim">초</span>
+      </div>
+      <div class="hud-right">
+        <button id="btnPlay" class="btn-play">▶ 미리보기</button>
+        <button id="btnStop" class="btn-icon" hidden aria-label="정지">■</button>
+      </div>
+    </div>
+    <div class="stage-progress"><i id="progressBar"></i></div>
+  </section>
+
+  <main>
+
+    <!-- 1. 내 영상 -->
+    <section class="card" id="cardVoice">
+      <h2><b>1</b> 내 영상 <small>다인이/아기 영상 · 목소리 자동 추출</small></h2>
+      <label class="drop" id="dropVoice">
+        <input type="file" id="fileVoice" accept="video/*,audio/*">
+        <span class="drop-ico">🎬</span>
+        <span class="drop-t">영상 올리기</span>
+        <span class="drop-s">MP4 · MOV · WebM · MP3 · M4A</span>
+      </label>
+      <div id="voiceLoaded" hidden>
+        <div class="filemeta">
+          <span id="voiceName" class="ellipsis"></span>
+          <span class="row tight"><span id="voiceDur" class="dim"></span><button id="btnChangeVoice" class="ghost sm">다른 영상</button></span>
+        </div>
+        <canvas id="waveVoice" class="wave"></canvas>
+        <div class="row between">
+          <div class="segcount"><b id="segCount">0</b>개 구간 · 사용 <b id="segOn">0</b></div>
+          <div class="row tight">
+            <button id="btnEven" class="ghost sm">균등 분할</button>
+            <button id="btnAnalyze" class="ghost sm">다시 분석</button>
+          </div>
+        </div>
+        <div id="segList" class="seglist"></div>
+        <p class="hint" id="segHint" hidden>목소리 구간을 찾지 못했어요. <b>균등 분할</b>로 나눈 뒤 시작점을 조정해 보세요.</p>
+      </div>
+    </section>
+
+    <!-- 2. 배경 비트 -->
+    <section class="card" id="cardBeat">
+      <h2><b>2</b> 배경 비트 <small>무료 신스 · 내 음원 · 유튜브</small></h2>
+      <div class="tabs" id="beatTabs" role="tablist">
+        <button data-tab="synth" class="on" role="tab">내장 신스</button>
+        <button data-tab="file" role="tab">내 음원</button>
+        <button data-tab="yt" role="tab">유튜브</button>
+      </div>
+
+      <div class="tabpane" id="pane-synth">
+        <div class="chips" id="genreChips">
+          <button data-genre="techno" class="on">테크노 <em>140</em></button>
+          <button data-genre="house">하우스 <em>128</em></button>
+          <button data-genre="trap">트랩 <em>145</em></button>
+          <button data-genre="lofi">Lo-fi <em>90</em></button>
+        </div>
+        <label class="slider">
+          <span>BPM</span>
+          <input id="bpm" type="range" min="90" max="160" step="1" value="140">
+          <output id="bpmOut">140</output>
+        </label>
+        <p class="hint">저작권 없는 내장 신스입니다. BPM을 바꾸면 구간·컷 길이도 함께 다시 계산돼요.</p>
+      </div>
+
+      <div class="tabpane" id="pane-file" hidden>
+        <label class="drop sm" id="dropBack">
+          <input type="file" id="fileBack" accept="audio/*,video/*">
+          <span class="drop-ico">🎵</span>
+          <span class="drop-t">음원 · 화면녹화 영상 올리기</span>
+          <span class="drop-s">MP3 · M4A · WAV · MP4 · MOV (영상이면 오디오만 자동 추출)</span>
+        </label>
+        <div id="backLoaded" hidden>
+          <div class="filemeta">
+            <span id="backName" class="ellipsis"></span>
+            <span class="row tight"><span id="backDur" class="dim"></span><button id="btnChangeBack" class="ghost sm">다른 음원</button></span>
+          </div>
+          <canvas id="waveBack" class="wave"></canvas>
+          <div class="trimrow">
+            <label class="num"><span>시작</span><input id="trimStartNum" type="number" min="0" step="0.1" value="0"><em>초</em></label>
+            <label class="num"><span>끝</span><input id="trimEndNum" type="number" min="0" step="0.1" value="0"><em>초</em></label>
+            <button id="btnTrimPlay" class="ghost sm">이 구간 듣기</button>
+          </div>
+          <div class="dualslider">
+            <input id="trimStart" type="range" min="0" max="100" step="0.1" value="0">
+            <input id="trimEnd" type="range" min="0" max="100" step="0.1" value="100">
+          </div>
+          <div class="row between wrap">
+            <div class="bpmrow">추정 BPM <b id="bpmEst">–</b>
+              <button id="btnBpmApply" class="ghost sm" hidden>적용</button>
+            </div>
+            <label class="num"><span>박자 시작</span><input id="offsetBack" type="number" min="0" step="0.01" value="0"><em>초</em></label>
+          </div>
+          <p class="hint">선택한 구간만 반복해 리믹스에 사용합니다. 박자 시작은 이 구간의 첫 박 위치(오프셋)예요.</p>
+        </div>
+      </div>
+
+      <div class="tabpane" id="pane-yt" hidden>
+        <div class="row gap">
+          <input id="ytUrl" type="url" class="text" placeholder="https://youtu.be/..." autocomplete="off">
+          <button id="btnYt" class="ghost sm">가져오기</button>
+        </div>
+        <p id="ytMsg" class="status"></p>
+        <details class="adv">
+          <summary>고급 · 프록시 엔드포인트</summary>
+          <div class="row gap">
+            <input id="ytProxy" type="url" class="text" placeholder="https://내-프록시/ (선택)" autocomplete="off">
+            <button id="btnYtProxySave" class="ghost sm">저장</button>
+          </div>
+          <p class="hint">Cobalt 호환 API나 직접 만든 추출 프록시를 넣으면 시도합니다. 유튜브는 봇 차단/CORS로 브라우저 직접 추출이 대부분 막혀 있어요.</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- 3. 구성 · 길이 -->
+    <section class="card" id="cardArrange">
+      <h2><b>3</b> 구성 · 길이 <small>구간별 시간 직접 지정</small></h2>
+      <div class="lenpresets" id="lenPresets">
+        <button data-sec="10">10초</button>
+        <button data-sec="15">15초</button>
+        <button data-sec="20" class="on">20초</button>
+        <button data-sec="30">30초</button>
+        <button data-sec="45">45초</button>
+        <button data-sec="60">60초</button>
+      </div>
+      <div class="lenrow">
+        <label class="num"><span>총 길이</span><input id="lenCustom" type="number" min="3" max="180" step="0.1" value="20.6"><em id="lenUnitLabel">초</em></label>
+        <button id="lenUnit" class="ghost sm" data-unit="sec">초 ↔ 마디</button>
+        <button id="btnFit" class="ghost sm">목표에 맞추기</button>
+      </div>
+      <div class="totalrow">합계 <b id="totalLen2">0.0</b>초 · <b id="totalBars">0</b>마디 · <b id="cutCount">0</b>컷 <span class="dim">@ <span id="bpmLabel">140</span> BPM</span></div>
+      <div id="tlBar" class="tlbar" aria-hidden="true"></div>
+      <div id="secList" class="seclist"></div>
+      <div class="row gap wrap">
+        <button id="btnAddDrop" class="ghost sm">+ 드롭</button>
+        <button id="btnAddBreak" class="ghost sm">+ 브레이크</button>
+        <button id="btnAddIntro" class="ghost sm">+ 인트로</button>
+        <button id="btnResetSec" class="ghost sm">기본 구성</button>
+      </div>
+    </section>
+
+    <!-- 4. 자동 편집 -->
+    <section class="card" id="cardEdit">
+      <h2><b>4</b> 영상 자동 편집 <small>비트에 맞춰 컷 · 줌 펀치</small></h2>
+      <label class="switchrow">
+        <span><b>비트 싱크 자동 컷</b><em>목소리 피크 구간으로 자동 점프컷</em></span>
+        <input type="checkbox" id="autoEdit" checked>
+      </label>
+      <div id="editOpts">
+        <label class="selrow"><span>컷 길이</span>
+          <select id="cutBeats">
+            <option value="1">1박 (빠르게)</option>
+            <option value="2">2박</option>
+            <option value="4" selected>1마디</option>
+            <option value="8">2마디 (느리게)</option>
+          </select>
+        </label>
+        <label class="selrow"><span>줌 펀치</span>
+          <select id="punchLevel">
+            <option value="0">끔</option>
+            <option value="0.022">약</option>
+            <option value="0.045" selected>중</option>
+            <option value="0.08">강</option>
+          </select>
+        </label>
+        <label class="selrow"><span>비트 플래시</span>
+          <select id="flashLevel">
+            <option value="0">끔</option>
+            <option value="0.05">약</option>
+            <option value="0.1" selected>중</option>
+            <option value="0.18">강</option>
+          </select>
+        </label>
+        <label class="switchrow compact">
+          <span><b>비트 펄스</b><em>배지·테두리가 박자에 반응</em></span>
+          <input type="checkbox" id="pulseOn" checked>
+        </label>
+        <label class="slider">
+          <span>화면 세로</span>
+          <input id="fitY" type="range" min="0" max="1" step="0.01" value="0.42">
+          <output id="fitYOut">42%</output>
+        </label>
+      </div>
+    </section>
+
+    <!-- 5. 포맷 -->
+    <section class="card" id="cardFormat">
+      <h2><b>5</b> 출력 포맷 <small>기본 Ver.1 다인이네</small></h2>
+      <div class="formatchips" id="fmtChips"></div>
+      <div class="fmtgrid">
+        <label class="num"><span>배경</span><input type="color" id="fmtBg" value="#000000"></label>
+        <label class="num"><span>강조</span><input type="color" id="fmtAccent" value="#FF2A85"></label>
+        <label class="num"><span>글자 크기</span><input id="fmtFont" type="range" min="0.7" max="1.4" step="0.02" value="1"><em id="fmtFontOut">100%</em></label>
+      </div>
+      <div class="row gap wrap">
+        <label class="selrow grow"><span>로고</span>
+          <select id="badgeLogo">
+            <option value="cat" selected>치즈냥이</option>
+            <option value="dog">검은 강아지</option>
+            <option value="none">없음</option>
+            <option value="custom">내 이미지</option>
+          </select>
+        </label>
+        <label class="selrow grow"><span>배지 문구</span>
+          <input id="badgeText" class="text" type="text" value="다인이네" maxlength="18">
+        </label>
+      </div>
+      <label class="drop sm" id="dropLogo" hidden>
+        <input type="file" id="fileLogo" accept="image/*">
+        <span class="drop-t">로고 이미지 선택</span>
+      </label>
+      <div class="row gap wrap">
+        <button id="btnSaveFmt" class="primary sm">+ 포맷 저장</button>
+        <button id="btnDelFmt" class="ghost sm" hidden>이 포맷 삭제</button>
+      </div>
+      <p class="hint">내 포맷은 이 기기 브라우저(localStorage)에 저장됩니다. 제목의 <code>*단어*</code>는 형광핑크로 강조돼요.</p>
+    </section>
+
+    <!-- 6. 사운드 · 제목 -->
+    <section class="card" id="cardMix">
+      <h2><b>6</b> 사운드 · 후킹 멘트</h2>
+      <label class="field"><span>후킹 1줄</span><input id="title1" class="text" type="text" value="뿌애!" maxlength="40" placeholder="예: 뿌애!"></label>
+      <label class="field"><span>후킹 2줄</span><input id="title2" class="text" type="text" value="*140*BPM 테크노 리믹스" maxlength="40" placeholder="예: *140*BPM 테크노 리믹스"></label>
+      <div class="sliders">
+        <label class="slider"><span>목소리</span><input id="voiceVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="voiceVolOut">100%</output></label>
+        <label class="slider"><span>반주</span><input id="beatVol" type="range" min="0" max="1.5" step="0.01" value="0.8"><output id="beatVolOut">80%</output></label>
+        <label class="slider"><span>에코</span><input id="reverb" type="range" min="0" max="0.8" step="0.01" value="0.18"><output id="reverbOut">18%</output></label>
+        <label class="slider"><span>피치</span><input id="pitch" type="range" min="0.75" max="1.35" step="0.01" value="1"><output id="pitchOut">1.00</output></label>
+      </div>
+    </section>
+
+    <!-- 7. 내보내기 -->
+    <section class="card" id="cardExport">
+      <h2><b>7</b> 내보내기</h2>
+      <button id="btnRender" class="primary wide">🎬 영상으로 렌더링</button>
+      <div id="renderBox" hidden>
+        <div class="progress"><i id="renderBar"></i></div>
+        <p id="renderMsg" class="status"></p>
+        <div id="outList" class="outlist"></div>
+        <canvas id="thumb" class="thumb" hidden></canvas>
+      </div>
+      <p class="hint">영상은 실시간으로 렌더링돼요(길이만큼 걸립니다). MP4를 지원하지 않는 브라우저는 WebM으로 저장되고, 오디오는 WAV로도 받을 수 있어요.</p>
+    </section>
+
+    <details class="help card">
+      <summary>사용법 · 팁</summary>
+      <ol>
+        <li>영상을 올리면 목소리(옹알이) 구간을 자동으로 찾아요. 맞지 않으면 <b>다시 분석</b>이나 <b>균등 분할</b>.</li>
+        <li>비트는 내장 신스 4종에서 고르거나, 내 음원/화면녹화 영상의 <b>원하는 구간</b>만 잘라 쓸 수 있어요.</li>
+        <li>구성에서 <b>총 길이</b>와 <b>구간(인트로·드롭·브레이크)별 마디</b>를 직접 조정하세요.</li>
+        <li>포맷에서 Ver.1/풀스크린/화이트/네온을 고르거나 내 포맷을 저장해요.</li>
+      </ol>
+    </details>
+  </main>
+
+  <footer class="foot">
+    <span>다인이네 · 리믹스 스튜디오</span>
+    <span id="verLabel">v1.0</span>
+  </footer>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
