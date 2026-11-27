@@ -1,6 +1,6 @@
 // 다인이 리믹스 스튜디오 — 앱 로직
 import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js';
-import { encodeMp4, webCodecsSupported } from './encode.js';
+import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported } from './encode.js';
 import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.2.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
@@ -1445,6 +1445,19 @@ function syncFxControls() {
 }
 
 // 저장 화질 UI
+// 내보내기 안내 — 이 기기가 30fps 고정 인코딩을 할 수 있는지에 맞춰 문구를 바꾼다
+function syncEncodeHint() {
+  const node = document.getElementById('renderHint');
+  if (!node) return;
+  if (webCodecsSupported()) {
+    node.innerHTML = '영상은 <b>30fps 고정</b>으로 한 장씩 인코딩해요(길이의 2~6배 정도 걸립니다). 슬라이드처럼 끊기지 않고 사진첩에서도 부드럽게 재생돼요. 오디오는 WAV로도 받을 수 있어요.';
+  } else if (webCodecsVideoSupported()) {
+    node.innerHTML = '이 브라우저는 <b>오디오 인코더가 없어</b> 실시간 녹화로 저장돼요(프레임이 조금 끊길 수 있어요). 아이폰은 <b>iOS 26 이상</b>이면 30fps 고정 저장이 켜지고, 지금은 WAV 오디오를 함께 받아 두면 편해요.';
+  } else {
+    node.innerHTML = '이 브라우저는 30fps 고정 인코딩(WebCodecs)을 지원하지 않아 실시간 녹화로 저장돼요. 아이폰 Safari(iOS 16.4+)나 최신 크롬에서 30fps 고정 저장이 켜집니다.';
+  }
+}
+
 function syncRes() {
   if (el.resChips) {
     const cur = S.renderRes === '1080' ? '1080' : '720';
@@ -1499,6 +1512,7 @@ function syncControls() {
   el.fitYOut.textContent = `${Math.round(S.fitY * 100)}%`;
   syncFitMode();
   syncRes();
+  syncEncodeHint();
   syncFxControls();
   el.lenUnit.dataset.unit = S.lenUnit;
   syncBeatMode();

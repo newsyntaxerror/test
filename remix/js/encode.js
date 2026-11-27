@@ -7,11 +7,18 @@ export const FPS = 30;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 아이폰은 VideoEncoder가 Safari 16.4+ / AudioEncoder(AAC)는 Safari 26+ 에서 지원된다.
+// 둘 다 있어야 '30fps 고정 + 소리' MP4를 만들 수 있다.
+export function webCodecsVideoSupported() {
+  return typeof window.VideoEncoder === 'function' && typeof window.VideoFrame === 'function';
+}
+
+export function webCodecsAudioSupported() {
+  return typeof window.AudioEncoder === 'function' && typeof window.AudioData === 'function';
+}
+
 export function webCodecsSupported() {
-  return typeof window.VideoEncoder === 'function'
-    && typeof window.VideoFrame === 'function'
-    && typeof window.AudioEncoder === 'function'
-    && typeof window.AudioData === 'function';
+  return webCodecsVideoSupported() && webCodecsAudioSupported();
 }
 
 // ── 인코더 설정 고르기 ────────────────────────────────────
