@@ -29,6 +29,7 @@ const S = {
   voiceFx: 'all',       // all = 전체 목소리 · baby = 👶 아기 고음 위주(성인 저음 감쇄)
   voiceTrack: { offset: 0, vol: 1 },   // 🎙️ 옹알이 트랙 전체 시작 오프셋·볼륨
   voiceClips: null,     // null = 자동 배치 · [{id, segId, at, len, vol}] = 타임라인에서 손으로 만든 배치
+  clipsFor: null,       // 손으로 만든 배치가 어느 영상 것인지(이름·길이·구간 수) — 다른 영상엔 쓰지 않는다
   beatTrack: { start: 0, len: 0, vol: 1, fadeIn: 0, fadeOut: 0, srcOffset: 0 },   // 🎵 비트 트랙
   remixPattern: true,   // 가져온 음원 모드에서 박자 그리드 리믹스 패턴 사용
   beatDuck: 5,          // 옹알이가 터질 때 가져온 음원을 눌러주는 양(dB)
@@ -692,6 +693,10 @@ async function onVoiceFile(file) {
   }
 
   const segments = detectVoice(buf);
+  // 손으로 만든 타임라인 배치는 같은 영상(이름·길이·구간 수)일 때만 이어 쓴다.
+  const sig = `${file.name}|${(buf.duration || 0).toFixed(2)}|${segments.length}`;
+  if (S.clipsFor !== sig) S.voiceClips = null;
+  S.clipsFor = sig;
   const vp = peakOf(buf);
   const norm = clamp(0.55 / Math.max(0.01, vp), 0.6, 8);
   // 영상 길이를 못 읽었을 때(MediaRecorder WebM 등)는 오디오 길이를 쓴다 — 같은 영상의 소리
@@ -1639,7 +1644,7 @@ function saveState() {
       title1: S.title1, title2: S.title2, lenUnit: S.lenUnit,
       trim: S.trim, offsetBack: S.offsetBack,
       voiceFx: S.voiceFx, voiceTrack: S.voiceTrack, voiceClips: S.voiceClips, beatTrack: S.beatTrack,
-      remixPattern: S.remixPattern, beatDuck: S.beatDuck, gridConf: S.gridConf,
+      remixPattern: S.remixPattern, beatDuck: S.beatDuck, gridConf: S.gridConf, clipsFor: S.clipsFor,
     };
     localStorage.setItem(LS_STATE, JSON.stringify(data));
   } catch (e) {}
@@ -1706,6 +1711,7 @@ function loadState() {
       vol: clamp(num(c.vol, 1), 0, 1.5),
     }));
   } else S.voiceClips = null;
+  S.clipsFor = typeof d.clipsFor === 'string' ? d.clipsFor : null;
   S.remixPattern = d.remixPattern !== false;
   S.beatDuck = clamp(num(d.beatDuck, 5), 0, 10);
   S.gridConf = clamp(num(d.gridConf, 0), 0, 1);
