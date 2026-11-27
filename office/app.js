@@ -96,6 +96,7 @@
     busy: false,
     stickBottom: true,
     openNote: new Set(),
+    openHandoff: new Set(),
     settingsTab: 'ai',
     editingMember: null,
   };
@@ -513,7 +514,7 @@
       <div class="page-head">
         <div>
           <h2>작업실</h2>
-          <p>지시를 카드로 만들고 담당 비서에게 넘기세요.</p>
+          <p>지시를 카드로 만들고 담당 비서에게 넘기세요. 카드마다 🤝 인수인계 상세와 바통터치가 달려 있습니다.</p>
         </div>
       </div>
 
@@ -544,11 +545,15 @@
   function taskMarkup(t) {
     const m = S.memberById(t.assignee);
     const open = ui.openNote.has(t.id);
+    const hoOpen = ui.openHandoff.has(t.id);
+    const h = t.handoff || {};
+    const ready = !!(h.done || h.next || h.notes || h.repo || h.live);
     return `
       <article class="task" data-status="${esc(t.status)}">
         <div class="task-top">
           <span class="task-avatar">${esc(m ? m.emoji : '🗒')}</span>
           <span class="task-who">${esc(m ? m.name : '미지정')}</span>
+          ${ready ? '<span class="ho-badge" title="인수인계 상세 있음">🤝</span>' : ''}
           <span class="task-when">${timeAgo(t.createdAt)}</span>
           <button class="task-del" data-act="task-del" data-id="${esc(t.id)}" aria-label="삭제">${ICON.trash}</button>
         </div>
@@ -558,10 +563,237 @@
             <button data-act="task-status" data-id="${esc(t.id)}" data-s="${s}" class="${t.status === s ? 'is-on' : ''}">${STATUS_LABEL[s]}</button>
           `).join('')}
         </div>
+        <div class="ho ${hoOpen ? 'is-open' : ''}">
+          <button class="ho-head" data-act="task-handoff" data-id="${esc(t.id)}" aria-expanded="${hoOpen ? 'true' : 'false'}">
+            <span>🤝 인수인계 상세</span>
+            <span class="ho-sub">${ready ? esc(h.project || '정리됨') : '아직 비어 있음'}</span>
+            <span class="ho-caret">▾</span>
+          </button>
+          ${hoOpen ? handoffDetailMarkup(t) : ''}
+        </div>
+        <div class="task-tools">
+          <button class="tool-btn pass" data-act="task-pass" data-id="${esc(t.id)}">🤝 넘기기</button>
+          <button class="tool-btn copy" data-act="task-copy" data-id="${esc(t.id)}">📋 바통터치 복사</button>
+        </div>
         ${open
           ? `<div class="task-note"><textarea id="note-${esc(t.id)}" data-note="${esc(t.id)}" placeholder="진행 메모 (자동 저장)">${esc(t.note)}</textarea></div>`
           : `<div class="task-note editable" data-act="task-note" data-id="${esc(t.id)}">${esc(t.note)}</div>`}
       </article>`;
+  }
+
+  /* ── 인수인계 상세 ──────────────────────────────────────── */
+  function linkOrText(url) {
+    if (!url) return '';
+    if (/^https?:\/\//i.test(url)) {
+      return `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//, ''))}</a>`;
+    }
+    return esc(url);
+  }
+
+  function handoffDetailMarkup(t) {
+    const h = t.handoff || {};
+    const facts = [
+      ['저장소', h.repo],
+      ['브랜치', h.branch],
+      ['작업 위치', h.path],
+      ['라이브', h.live],
+      ['참고', h.extra],
+    ].filter(([, v]) => v);
+    const log = Array.isArray(h.log) ? h.log.slice().reverse() : [];
+    const block = (title, text) => `
+      <div class="ho-block">
+        <h5>${title}</h5>
+        <p>${text ? esc(text) : '<span class="ho-empty">아직 적지 않았어요</span>'}</p>
+      </div>`;
+    return `
+      <div class="ho-body">
+        ${h.project ? `<p class="ho-project">${esc(h.project)}</p>` : ''}
+        ${facts.length ? `<dl class="ho-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === '라이브' ? linkOrText(v) : esc(v)}</dd></div>`).join('')}</dl>` : ''}
+        ${block('지금까지 한 일', h.done)}
+        ${block('이어서 할 일', h.next)}
+        ${block('주의사항', h.notes)}
+        ${log.length ? `<div class="ho-block"><h5>바통터치 이력</h5><ul class="ho-log">${log.map((l) => `<li>${esc(l.at ? fmtTime(l.at) : '')} ${esc(l.fromName || l.from || '')} → ${esc(l.toName || l.to || '')}${l.comment ? ` · ${esc(l.comment)}` : ''}</li>`).join('')}</ul></div>` : ''}
+        <button class="ho-edit" data-act="task-handoff-edit" data-id="${esc(t.id)}">✏️ 상세 고치기</button>
+      </div>`;
+  }
+
+  function handoffPrompt(t) {
+    const h = t.handoff || {};
+    const project = h.project || t.title;
+    const fromName = (S.memberById(t.assignee) || {}).name || '미지정';
+    const today = new Date();
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const line = (v) => (v && String(v).trim() ? v.trim() : '');
+    const none = '(아직 기록 없음 — 이어받은 사람이 채워 주세요)';
+    const f = [];
+    if (line(h.repo)) f.push(`- GitHub 저장소: ${line(h.repo)}`);
+    if (line(h.branch)) f.push(`- 브랜치: ${line(h.branch)}`);
+    if (line(h.path)) f.push(`- 작업 위치: ${line(h.path)}`);
+    if (line(h.live)) f.push(`- 라이브 URL: ${line(h.live)}`);
+    if (line(h.extra)) f.push(`- 참고: ${line(h.extra)}`);
+
+    return [
+      `🤝 바통터치 — ${project}`,
+      `(달콩 비서실 v1.1 · ${date} · 이전 담당: ${fromName})`,
+      '',
+      '지금부터 아래 작업을 이어받아 진행해 주세요. 이 글만 읽고 바로 시작할 수 있게 정리했습니다.',
+      '',
+      '## 1. 프로젝트',
+      `- 이름: ${project}`,
+      ...(f.length ? f : ['- 저장소·URL: (아직 기록 없음)']),
+      `- 현재 상태: ${STATUS_LABEL[t.status] || t.status}`,
+      line(t.note) ? `- 진행 메모: ${line(t.note).replace(/\n/g, ' / ')}` : '',
+      '',
+      '## 2. 지금까지 한 일 (완료)',
+      line(h.done) || none,
+      '',
+      '## 3. 지금 바로 이어서 할 일',
+      line(h.next) || none,
+      '',
+      '## 4. 절대 건드리지 말 것 · 주의 규칙',
+      line(h.notes) || none,
+      '',
+      '## 5. 완료 후 보고',
+      '- 결과를 달콩 비서실(https://newsyntaxerror.github.io/test/office/) 작업실 카드의 진행 메모에 남기고, 카드의 🤝 넘기기로 다음 담당에게 넘겨 주세요.',
+      '- 슬랙 오브누아 #회의실(C0CKSPC209M)에 한 줄로 보고해 주세요.',
+      '- 막히는 부분이 있으면 추측으로 진행하지 말고, 무엇이 막혔는지 먼저 알려 주세요.',
+    ].filter((x) => x !== '').join('\n');
+  }
+
+  function openHandoffSheet(taskId) {
+    const t = S.state.tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const order = ['sub1', 'sub2', 'sub3', 'gpt', 'claude', 'gemini', 'boknim'];
+    const helpers = S.state.members.filter((m) => m.kind !== 'leader');
+    const ranked = [
+      ...order.map((id) => helpers.find((m) => m.id === id)).filter(Boolean),
+      ...helpers.filter((m) => !order.includes(m.id)),
+    ];
+    const fromName = (S.memberById(t.assignee) || {}).name || '미지정';
+    openSheet(`
+      <div class="sheet-panel">
+        <div class="sheet-head">
+          <div>
+            <h3>🤝 바통터치 — 넘기기</h3>
+            <p>${esc(t.title)}</p>
+          </div>
+          <button class="sheet-close" data-act="sheet-close" aria-label="닫기">${ICON.close}</button>
+        </div>
+        <div class="sheet-content ho-sheet">
+          <div class="field">
+            <label>지금 담당</label>
+            <div class="ho-from">${esc(fromName)}</div>
+          </div>
+          <div class="field">
+            <label>누구에게 넘길까요</label>
+            <div class="ho-targets">
+              ${ranked.map((m, i) => `
+                <label class="ho-target">
+                  <input type="radio" name="handoffTarget" value="${esc(m.id)}" ${i === 0 && m.id !== t.assignee ? 'checked' : ''}>
+                  <span class="ho-target-emoji">${esc(m.emoji)}</span>
+                  <span class="ho-target-text"><b>${esc(m.name)}</b><small>${esc(m.role || '')}</small></span>
+                  ${m.id === t.assignee ? '<em class="ho-now">현재</em>' : ''}
+                </label>`).join('')}
+            </div>
+          </div>
+          <div class="field">
+            <label>한 줄 코멘트</label>
+            <input class="input" id="handoffComment" type="text" maxlength="160" placeholder="예: v23 검수만 끝내고 라이브 반영 여부는 대장님께 확인해 주세요" autocomplete="off">
+            <span class="hint">넘기면 담당자가 바뀌고 회의실 #종합에 「📌 [바통터치]」 기록이 올라갑니다.</span>
+          </div>
+        </div>
+        <div class="sheet-foot">
+          <button class="btn ghost" data-act="sheet-close">취소</button>
+          <button class="btn primary" data-act="handoff-send" data-id="${esc(t.id)}">🤝 넘기기</button>
+        </div>
+      </div>`, { autofocus: false });
+  }
+
+  function sendHandoff(taskId) {
+    const t = S.state.tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const picked = $('input[name="handoffTarget"]:checked');
+    const toId = picked ? picked.value : '';
+    if (!toId) { toast('넘길 사람을 골라 주세요.'); return; }
+    const to = S.memberById(toId);
+    if (!to) { toast('받을 비서를 찾지 못했습니다.'); return; }
+    const from = S.memberById(t.assignee);
+    const fromName = (from || {}).name || '미지정';
+    const comment = (($('#handoffComment') || {}).value || '').trim().slice(0, 160);
+    const h = t.handoff || {};
+    const entry = { at: new Date().toISOString(), from: t.assignee || '', fromName, to: toId, toName: to.name, comment };
+    S.updateTask(t.id, { assignee: toId, handoff: { ...h, log: [...(h.log || []), entry] } });
+    const project = h.project || t.title;
+    S.addMessage({
+      channel: 'general',
+      authorId: 'system',
+      authorName: '비서실',
+      authorKind: 'system',
+      body: `📌 [바통터치] ${fromName} → ${to.name}: ${comment || `「${project}」 이어받기`}`,
+      kind: 'system',
+      meta: { taskId: t.id },
+    });
+    closeSheet();
+    toast(`${to.name}에게 넘겼습니다. 회의실 #종합에 기록했어요.`);
+    scheduleRender();
+  }
+
+  function openHandoffEditor(taskId) {
+    const t = S.state.tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const h = t.handoff || {};
+    const input = (id, label, val, ph) => `
+      <div class="field">
+        <label>${label}</label>
+        <input class="input" id="${id}" type="text" value="${esc(val || '')}" placeholder="${esc(ph || '')}" autocomplete="off">
+      </div>`;
+    const area = (id, label, val, ph) => `
+      <div class="field">
+        <label>${label}</label>
+        <textarea class="input" id="${id}" rows="4" placeholder="${esc(ph || '')}">${esc(val || '')}</textarea>
+      </div>`;
+    openSheet(`
+      <div class="sheet-panel">
+        <div class="sheet-head">
+          <div>
+            <h3>🤝 인수인계 상세</h3>
+            <p>${esc(t.title)}</p>
+          </div>
+          <button class="sheet-close" data-act="sheet-close" aria-label="닫기">${ICON.close}</button>
+        </div>
+        <div class="sheet-content ho-sheet">
+          ${input('hoProject', '프로젝트 이름', h.project, '예: 에디토(Edito) v1.0')}
+          ${input('hoRepo', 'GitHub 저장소', h.repo, '예: newsyntaxerror/test')}
+          ${input('hoBranch', '브랜치', h.branch, '예: gh-pages')}
+          ${input('hoPath', '작업 위치(폴더)', h.path, '예: office/')}
+          ${input('hoLive', '라이브 URL', h.live, '예: https://newsyntaxerror.github.io/test/office/')}
+          ${input('hoExtra', '참고(추가 URL·서비스)', h.extra, '예: Supabase 프로젝트 qqaogodxzfiuxhkkfjwt')}
+          ${area('hoDone', '지금까지 한 일 (완료)', h.done, '· 한 일을 한 줄씩')}
+          ${area('hoNext', '지금 바로 이어서 할 일', h.next, '1. 다음에 할 일\n2. 그다음 할 일')}
+          ${area('hoNotes', '절대 건드리지 말 것 · 주의사항', h.notes, '· 다른 폴더는 건드리지 않는다\n· 실사용자 데이터 주의')}
+        </div>
+        <div class="sheet-foot">
+          <button class="btn ghost" data-act="sheet-close">취소</button>
+          <button class="btn primary" data-act="handoff-save" data-id="${esc(t.id)}">저장</button>
+        </div>
+      </div>`, { autofocus: false });
+  }
+
+  function saveHandoffEditor(taskId) {
+    const t = S.state.tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const val = (id) => (($('#' + id) || {}).value || '').trim();
+    S.updateTask(t.id, {
+      handoff: {
+        ...(t.handoff || {}),
+        project: val('hoProject'), repo: val('hoRepo'), branch: val('hoBranch'), path: val('hoPath'),
+        live: val('hoLive'), extra: val('hoExtra'),
+        done: val('hoDone'), next: val('hoNext'), notes: val('hoNotes'),
+      },
+    });
+    closeSheet();
+    toast('인수인계 내용을 저장했습니다.');
+    scheduleRender();
   }
 
   /* ── 비서현황 ───────────────────────────────────────────── */
@@ -1189,6 +1421,34 @@
         paint();
         const ta = document.getElementById('note-' + el.dataset.id);
         if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+        break;
+      }
+      case 'task-handoff': {
+        const id = el.dataset.id;
+        if (ui.openHandoff.has(id)) ui.openHandoff.delete(id); else ui.openHandoff.add(id);
+        paint();
+        break;
+      }
+      case 'task-pass': {
+        openHandoffSheet(el.dataset.id);
+        break;
+      }
+      case 'task-copy': {
+        const t = S.state.tasks.find((x) => x.id === el.dataset.id);
+        if (!t) break;
+        await copyText(handoffPrompt(t), '바통터치 프롬프트를 복사했습니다. 다른 AI 채팅창에 붙여넣으세요.');
+        break;
+      }
+      case 'task-handoff-edit': {
+        openHandoffEditor(el.dataset.id);
+        break;
+      }
+      case 'handoff-save': {
+        saveHandoffEditor(el.dataset.id);
+        break;
+      }
+      case 'handoff-send': {
+        sendHandoff(el.dataset.id);
         break;
       }
       case 'member-edit': {

@@ -31,12 +31,16 @@ window.OFFICE_CONFIG = {
     { id: "life",     emoji: "🍼", name: "육아·생활",    desc: "다인이 · 집안일 · 생활정보" },
   ],
 
+  /* v1.1 — 서브피클 3인 체제. 예전 단일 '서브피클'(subpickle) 데이터는
+     store.js 가 서브1로 옮겨 줍니다. */
   MEMBERS: [
-    { id: "dalkong",    emoji: "👑", name: "달콩",     role: "대장님",              model: "사람",              status: "지시 중",  provider: "none",      kind: "leader",  channels: ["general", "content", "dev", "life"], sort: 0 },
-    { id: "boknim",     emoji: "🥒", name: "복님이",   role: "메인 비서 · Pickle",  model: "Pickle (메인)",      status: "온라인",   provider: "none",      kind: "pickle",  channels: ["general", "dev"], sort: 1 },
-    { id: "subpickle",  emoji: "🌿", name: "서브피클", role: "서브폰 비서 · Pickle", model: "Pickle (서브폰)",   status: "대기",     provider: "none",      kind: "pickle",  channels: ["life"], sort: 2 },
-    { id: "gpt",        emoji: "🧠", name: "GPT",      role: "아이디어 · 리서치",    model: "gpt-4o-mini",        status: "키 대기",  provider: "openai",    kind: "ai",      channels: ["general", "content"], sort: 3 },
-    { id: "claude",     emoji: "🍊", name: "클로드",   role: "글쓰기 · 기획 검토",   model: "claude-sonnet-4-5",  status: "키 대기",  provider: "anthropic", kind: "ai",      channels: ["general", "content", "dev"], sort: 4 },
-    { id: "gemini",     emoji: "✨", name: "제미나이", role: "요약 · 검색 정리",     model: "gemini-2.5-flash",   status: "키 대기",  provider: "gemini",    kind: "ai",      channels: ["general", "life"], sort: 5 },
+    { id: "dalkong",    emoji: "👑", name: "달콩",        role: "대장님",              model: "사람",              status: "지시 중",  provider: "none",      kind: "leader",  channels: ["general", "content", "dev", "life"], sort: 0 },
+    { id: "boknim",     emoji: "🥒", name: "복님이",      role: "메인 비서 · Pickle",  model: "Pickle (메인)",      status: "온라인",   provider: "none",      kind: "pickle",  channels: ["general", "dev"], sort: 1 },
+    { id: "sub1",       emoji: "🌱", name: "서브1",       role: "서브피클 1호 · 이동·현장", model: "Pickle (서브폰 1)", status: "대기",  provider: "none",      kind: "pickle",  channels: ["general", "life"], sort: 2 },
+    { id: "sub2",       emoji: "🌿", name: "서브2",       role: "서브피클 2호 · 기록·정리", model: "Pickle (서브폰 2)", status: "대기",  provider: "none",      kind: "pickle",  channels: ["general", "content"], sort: 3 },
+    { id: "sub3",       emoji: "🍀", name: "서브3",       role: "서브피클 3호 · 확인·연락", model: "Pickle (서브폰 3)", status: "대기",  provider: "none",      kind: "pickle",  channels: ["general", "life"], sort: 4 },
+    { id: "gpt",        emoji: "🧠", name: "GPT",         role: "아이디어 · 리서치",    model: "gpt-4o-mini",        status: "키 대기",  provider: "openai",    kind: "ai",      channels: ["general", "content"], sort: 5 },
+    { id: "claude",     emoji: "🍊", name: "클로드",      role: "글쓰기 · 기획 검토",   model: "claude-sonnet-4-5",  status: "키 대기",  provider: "anthropic", kind: "ai",      channels: ["general", "content", "dev"], sort: 6 },
+    { id: "gemini",     emoji: "✨", name: "제미나이",    role: "요약 · 검색 정리",     model: "gemini-2.5-flash",   status: "키 대기",  provider: "gemini",    kind: "ai",      channels: ["general", "life"], sort: 7 },
   ],
 };

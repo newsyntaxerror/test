@@ -11,6 +11,10 @@
   const K_SET = 'dalkong.office.settings.v1';
   const K_DATA = 'dalkong.office.data.v1';
 
+  /* v1.1 — 기본 데이터 버전과 옛 멤버 id 이전 */
+  const SEED_VERSION = '1.1';
+  const LEGACY_MEMBER_IDS = { subpickle: 'sub1' };
+
   const uid = () => (window.crypto && crypto.randomUUID
     ? crypto.randomUUID()
     : 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8));
@@ -56,12 +60,173 @@
     messages: [],
     tasks: [],
     memos: [],
+    seedVersion: '',
   };
 
   /* ── 구독 ───────────────────────────────────────────────── */
   const listeners = new Set();
   function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
   function emit(reason) { listeners.forEach((fn) => { try { fn(reason); } catch (e) { console.warn(e); } }); }
+
+  /* ── 인수인계 기본 카드 (v1.1) ────────────────────────────
+     진행 중 프로젝트 4종. id 를 고정해 두어 여러 번 실행해도
+     같은 카드가 두 장 생기지 않고, 앱을 새로 깔지 않은 기존
+     데이터에도 한 번만 합쳐집니다. */
+  const SEED_TASKS = [
+    {
+      id: 'seed-v11-edito',
+      title: '에디토(Edito) v1.0 — 카드뉴스 웹앱 운영·개선',
+      assignee: 'boknim', status: 'done',
+      note: '원고 → 카드 분할 → 6종 템플릿 → PNG/ZIP 내보내기까지 동작. 실제 1편 검수만 남음.',
+      handoff: {
+        project: '에디토(Edito) v1.0',
+        repo: 'newsyntaxerror/test',
+        branch: 'gh-pages',
+        path: 'edito/',
+        live: 'https://newsyntaxerror.github.io/test/edito/',
+        extra: '',
+        done: '· 원고를 붙여넣으면 카드(장) 단위로 자동 분할\n' +
+              '· 매거진 템플릿 6종 — 에디토리얼 · 다크 · 크림 페이퍼 · 오렌지 포인트 · 뉴스 브리핑 · 사진 무드\n' +
+              '· 표지 카드, 9:16 타이포 스케일, 세로 균형 조정\n' +
+              '· PNG 낱장 저장 + ZIP 묶음 내보내기\n' +
+              '· 카드 시트 상단 실시간 미니 프리뷰, 사용법 시트, 저장 실패 안내\n' +
+              '· 해시태그·표지 제목 정리',
+        next: '1. 실제 원고 1편으로 폰에서 끝까지 제작 → PNG/ZIP 내보내기 검수\n' +
+              '2. 인스타 업로드용 해시태그 세트 저장 기능이 필요한지 결정\n' +
+              '3. 계절·이벤트용 템플릿 변형을 추가할지 결정',
+        notes: '· newsyntaxerror/test 의 edito/ 폴더만 고칩니다. office/ · daily-trend-viewer/ · 루트(our-map 테스트)는 건드리지 않습니다.\n' +
+               '· 고친 뒤 index.html 과 sw.js 의 ?v= 값을 함께 올려 캐시를 갱신합니다.\n' +
+               '· 공개 저장소입니다. 개인 사진·실명·연락처를 코드나 예시 데이터에 넣지 않습니다.',
+        log: [],
+      },
+    },
+    {
+      id: 'seed-v11-ourmap',
+      title: '우리끼리(our-map) v23 반영 검토',
+      assignee: 'boknim', status: 'doing',
+      note: '테스트 서버 v23 벡터 지도 검수 → 라이브(v21) 반영 여부 결정 대기.',
+      handoff: {
+        project: '우리끼리(our-map) v23 반영 검토',
+        repo: 'newsyntaxerror/test · newsyntaxerror/our-map',
+        branch: 'main / gh-pages',
+        path: 'test 저장소 루트(테스트) · our-map 저장소 루트(라이브)',
+        live: 'https://newsyntaxerror.github.io/our-map/',
+        extra: '테스트: https://newsyntaxerror.github.io/test/ · Supabase 프로젝트 qqaogodxzfiuxhkkfjwt · 상세 HANDOFF.md 는 our-map 저장소 main',
+        done: '· 테스트 서버 v23: MapLibre GL 4.7.1 + OpenFreeMap 벡터 지도 4종(파스텔 Liberty · 미니멀 Positron · 밝게 Bright · 다크 fiord) 적용 — 확대 해상도 문제 해결\n' +
+              '· WebGL 실패 시 OSM 자동 폴백\n' +
+              '· 라이브는 v21로 정상 운영 중(실사용자 데이터 있음)',
+        next: '1. 테스트 서버 v23를 폰(사파리·크롬)에서 검수 — 지도 확대, 동선, 채팅, 알림\n' +
+              '2. 문제 없으면 라이브(our-map) 반영 여부를 대장님께 확인\n' +
+              '3. 반영 시 실사용자 데이터(친구·위치·채팅) 보존을 확인하고 배포',
+        notes: '· 라이브에는 실제 사용자 데이터가 있습니다. 검증용 테스트 데이터는 확인 뒤 반드시 삭제합니다.\n' +
+               '· DB 조회·수정은 SECURITY DEFINER RPC로만 합니다. 표를 직접 만지지 않습니다.\n' +
+               '· 공개 저장소입니다. 개인정보·거주 구·비밀키를 코드에 넣지 않습니다.\n' +
+               '· 수정할 때마다 버전을 적어 보고합니다(v21 → v22 …).',
+        log: [],
+      },
+    },
+    {
+      id: 'seed-v11-daini',
+      title: '다인이네 숏츠 Ver.1 제작',
+      assignee: 'sub2', status: 'doing',
+      note: '규격 확정 · 기준본 있음. 새 영상 1편 검수 남음.',
+      handoff: {
+        project: '다인이네 숏츠 Ver.1',
+        repo: '— (영상 작업 · 저장소 없음)',
+        branch: '—',
+        path: '작업 파일 downloads/ · 기준본은 슬랙 #다인이네',
+        live: '슬랙 오브누아 #다인이네 (C0CLYT9KL5R)',
+        extra: '기준본: downloads/daini_ppuae.mp4 (9.62초) · 테크노 리믹스: downloads/daini_ppuae_techno_20s.mp4 (20.57초)',
+        done: '· Ver.1 포맷 확정 — 1080×1920 순수 검정 배경, 중앙 영상 940×1000\n' +
+              '· 상단 제목: Pretendard ExtraBold, 흰색 + 형광핑크 #FF2A85\n' +
+              '· 하단: 엄지척 치즈냥이 + 「다인이네」\n' +
+              '· 기준본(다인 뿌애 9.62초)과 140BPM 테크노 리믹스 20.57초본 전달',
+        next: '1. 새 영상 1편을 Ver.1 포맷으로 제작해 검수받기\n' +
+              '2. 이번 주 3편 업로드 계획(제목·썸네일 문구 포함) 세우기\n' +
+              '3. 테크노 리믹스 반응을 확인한 뒤 다음 곡 진행 여부 결정',
+        notes: '· 규격은 임의로 바꾸지 않습니다(비율·색·폰트·하단 캐릭터).\n' +
+               '· 아이 영상·이름은 이 채널 밖으로 공유하지 않습니다.\n' +
+               '· 원본 영상은 downloads/ 에 그대로 두고 덮어쓰지 않습니다.',
+        log: [],
+      },
+    },
+    {
+      id: 'seed-v11-trend',
+      title: '데일리 트렌드 뷰어 — 자동 갱신 붙이기',
+      assignee: 'sub3', status: 'doing',
+      note: '웹 커스텀 버전 배포 완료. 지금은 11/25 01:13 수집본 고정.',
+      handoff: {
+        project: '데일리 트렌드 뷰어',
+        repo: 'newsyntaxerror/test',
+        branch: 'gh-pages',
+        path: 'daily-trend-viewer/ (소스는 daily-trend-viewer 브랜치)',
+        live: 'https://newsyntaxerror.github.io/test/daily-trend-viewer/',
+        extra: '원본: lmorejh/daily-trend-viewer (MIT)',
+        done: '· ⚙️ 내 분야 시트 — 분야 켜기/끄기, 순서 변경, 새 분야+키워드 추가\n' +
+              '· 「★ 내 키워드만」 필터, 검색, JSON/텍스트 내보내기, localStorage 저장\n' +
+              '· 기본 칩: 전체 · 육아 · 살림 · 쿠파스 · 쇼핑템 · 예짜 · 밈 · AI\n' +
+              '· 2026-11-25 01:13 수집본 탑재(유튜브·쇼츠 84조합, 스레드 11건, 틱톡 7건, AI 뉴스 40건 등)',
+        next: '1. 자동 재수집(매일 1회)을 붙일 방법 결정 — GitHub Actions 또는 Pickle 정기 실행\n' +
+              '2. 릴스 탭이 2026-09-15 데이터에 멈춰 있는 문제 확인\n' +
+              '3. 정식 저장소(newsyntaxerror/daily-trend-viewer)로 옮길지 결정',
+        notes: '· newsyntaxerror/test 의 daily-trend-viewer/ 폴더만 고칩니다. office/ · edito/ · 루트는 건드리지 않습니다.\n' +
+               '· 공개된 게시물만 수집합니다. 비공개 계정·개인정보를 저장하지 않습니다.\n' +
+               '· 원본 MIT 라이선스 — 출처 표기를 유지합니다.',
+        log: [],
+      },
+    },
+  ];
+
+  const SEED_MEMOS = [
+    {
+      id: 'seed-v11-memo-handoff',
+      title: '🤝 바통터치 사용법 (v1.1)',
+      body: '작업실 카드마다 인수인계 상세가 붙어 있습니다.\n' +
+            '· 카드의 「🤝 인수인계 상세」를 펼치면 저장소·브랜치·라이브 URL, 한 일, 이어서 할 일, 주의사항이 보입니다.\n' +
+            '· 🤝 넘기기 → 받을 비서(서브1·2·3, GPT, 클로드, 제미나이, 복님이)를 고르고 한 줄 코멘트를 남기면 담당자가 바뀌고 회의실 #종합에 「📌 [바통터치]」 기록이 올라갑니다.\n' +
+            '· 📋 바통터치 복사 → 다른 피클이나 AI 채팅창에 그대로 붙여넣으면 바로 이어받을 수 있는 완성된 프롬프트가 복사됩니다.\n' +
+            '· 상세 내용은 ✏️ 로 직접 고칠 수 있습니다. 빈 칸이 있어도 복사는 됩니다(있는 내용만 정리).',
+      pinned: true,
+    },
+    {
+      id: 'seed-v11-memo-projects',
+      title: '진행 중 프로젝트 4종 (v1.1 기준)',
+      body: '1. 에디토(Edito) v1.0 — newsyntaxerror/test · gh-pages · /edito/ · 완료, 실제 1편 검수만 남음\n' +
+            '2. 우리끼리(our-map) v23 — 테스트 서버 검수 뒤 라이브(v21) 반영 여부 결정 대기\n' +
+            '3. 다인이네 숏츠 Ver.1 — 규격 확정, 새 영상 1편 제작·검수 대기\n' +
+            '4. 데일리 트렌드 뷰어 — 웹 커스텀 배포 완료, 자동 재수집이 남음',
+      pinned: false,
+    },
+  ];
+
+  function normalizeHandoff(h) {
+    const src = h && typeof h === 'object' ? h : {};
+    const str = (v) => (typeof v === 'string' ? v : '');
+    return {
+      project: str(src.project), repo: str(src.repo), branch: str(src.branch), path: str(src.path),
+      live: str(src.live), extra: str(src.extra),
+      done: str(src.done), next: str(src.next), notes: str(src.notes),
+      log: Array.isArray(src.log) ? src.log.slice(-20) : [],
+    };
+  }
+  function normalizeTask(t) {
+    return {
+      id: t.id, title: t.title || '', assignee: LEGACY_MEMBER_IDS[t.assignee] || t.assignee || '',
+      status: ['todo', 'doing', 'done'].includes(t.status) ? t.status : 'todo',
+      note: t.note || '', handoff: normalizeHandoff(t.handoff),
+      createdAt: t.createdAt || nowISO(), updatedAt: t.updatedAt || t.createdAt || nowISO(),
+    };
+  }
+  function cloneTask(t) {
+    return normalizeTask({
+      ...t, handoff: { ...normalizeHandoff(t.handoff), log: [] },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+  }
+  function cloneMemo(m) {
+    const at = new Date().toISOString();
+    return { id: m.id, title: m.title || '', body: m.body || '', pinned: !!m.pinned, createdAt: at, updatedAt: at };
+  }
 
   /* ── 최초 데이터 ────────────────────────────────────────── */
   function seed() {
@@ -74,9 +239,10 @@
       authorId: 'boknim',
       authorName: '복님이',
       authorKind: 'pickle',
-      body: '대장님, 「달콩 비서실」 문 열었습니다 🥒\n' +
-            '여기서 저랑 서브피클, GPT · 클로드 · 제미나이가 한 채널에 모여 일합니다.\n\n' +
+      body: '대장님, 「달콩 비서실」 v1.1로 올렸습니다 🥒\n' +
+            '이제 서브피클이 1호 🌱 · 2호 🌿 · 3호 🍀 셋으로 나뉘어 일합니다.\n\n' +
             '· 부르고 싶은 비서는 아래 칩으로 @멘션하거나 그냥 이름을 불러 주세요.\n' +
+            '· 작업실 카드에서 「🤝 넘기기」로 일을 넘기고, 「📋 바통터치 복사」로 다른 AI에 그대로 붙여넣을 수 있는 인수인계문을 복사합니다.\n' +
             '· 설정(⚙️) → AI 연결에 키를 넣으면 GPT·클로드·제미나이가 진짜로 답합니다. 지금은 시뮬레이션 모드예요.\n' +
             '· 두 대 이상에서 같이 쓰려면 설정 → 동기화에서 SQL을 한 번 실행해 주세요.',
       kind: 'chat',
@@ -84,13 +250,28 @@
       createdAt: new Date(t - 60 * 1000).toISOString(),
     }];
     state.tasks = [
-      { id: uid(), title: '다인이네 숏츠 Ver.1 포맷으로 이번 주 3편 올리기', assignee: 'boknim', status: 'doing', note: 'K덕톡 스타일 하이라이트 + 140BPM 테크노 리믹스', createdAt: new Date(t - 3 * 3600e3).toISOString(), updatedAt: new Date(t - 3600e3).toISOString() },
-      { id: uid(), title: '이 비서실 슬랙 #회의실에 프로젝트로 등록', assignee: 'boknim', status: 'done', note: 'C0CKSPC209M', createdAt: new Date(t - 5 * 3600e3).toISOString(), updatedAt: new Date(t - 2 * 3600e3).toISOString() },
-      { id: uid(), title: '서브폰 피클 친구 추가하고 서브피클 연결하기', assignee: 'subpickle', status: 'todo', note: '서브폰 Pickle 앱 → 친구 추가 → 복님이에게 핸들 전달', createdAt: new Date(t - 30 * 60e3).toISOString(), updatedAt: new Date(t - 30 * 60e3).toISOString() },
+      ...SEED_TASKS.map(cloneTask),
+      { id: uid(), title: '서브폰 Pickle 3대를 서브1·2·3에 연결하기', assignee: 'sub1', status: 'todo', note: '서브폰 Pickle 앱 → 복님이와 친구 → 각 폰의 핸들을 비서현황에서 이름에 맞춰 정리', handoff: normalizeHandoff({}), createdAt: new Date(t - 30 * 60e3).toISOString(), updatedAt: new Date(t - 30 * 60e3).toISOString() },
+      { id: uid(), title: '이 비서실 슬랙 #회의실에 프로젝트로 등록', assignee: 'boknim', status: 'done', note: 'C0CKSPC209M', handoff: normalizeHandoff({}), createdAt: new Date(t - 5 * 3600e3).toISOString(), updatedAt: new Date(t - 2 * 3600e3).toISOString() },
     ];
     state.memos = [
-      { id: uid(), title: '비서실 사용법', body: '· @전체 → 다섯 비서가 차례로 답합니다.\n· 💬 토론(2바퀴) → 연결된 AI끼리 서로 의견을 주고받습니다.\n· 작업실에서 지시를 카드로 만들고 대기 → 진행 → 완료로 넘기세요.\n· 메모는 상단 고정해 두면 늘 맨 위에 있습니다.', pinned: true, createdAt: new Date(t - 90 * 60e3).toISOString(), updatedAt: new Date(t - 90 * 60e3).toISOString() },
+      ...SEED_MEMOS.map(cloneMemo),
+      { id: uid(), title: '비서실 사용법', body: '· @전체 → 모든 비서가 차례로 답합니다.\n· 💬 토론(2바퀴) → 연결된 AI끼리 서로 의견을 주고받습니다.\n· 작업실에서 지시를 카드로 만들고 대기 → 진행 → 완료로 넘기세요.\n· 메모는 상단 고정해 두면 늘 맨 위에 있습니다.', pinned: true, createdAt: new Date(t - 90 * 60e3).toISOString(), updatedAt: new Date(t - 90 * 60e3).toISOString() },
     ];
+    state.seedVersion = SEED_VERSION;
+  }
+
+  /* 기존 데이터에 v1.1 기본 카드·메모를 한 번만 합칩니다. */
+  function mergeSeed() {
+    let added = 0;
+    SEED_TASKS.forEach((st) => {
+      if (!state.tasks.some((t) => t.id === st.id)) { state.tasks.push(cloneTask(st)); added += 1; }
+    });
+    SEED_MEMOS.forEach((sm) => {
+      if (!state.memos.some((m) => m.id === sm.id)) { state.memos.push(cloneMemo(sm)); added += 1; }
+    });
+    state.seedVersion = SEED_VERSION;
+    return added;
   }
 
   function normalizeMember(m) {
@@ -110,14 +291,54 @@
       return;
     }
     state.channels = data.channels.map((c) => ({ ...c }));
-    state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    state.tasks = (Array.isArray(data.tasks) ? data.tasks : []).map(normalizeTask);
     state.memos = Array.isArray(data.memos) ? data.memos : [];
     state.messages = Array.isArray(data.messages) ? data.messages : [];
+    state.seedVersion = data.seedVersion || '';
 
     // 기본 멤버는 항상 보장하고, 사용자가 고친 값은 그대로 둡니다.
     const saved = new Map((Array.isArray(data.members) ? data.members : []).map((m) => [m.id, normalizeMember(m)]));
+    // v1.0 의 단일 '서브피클' → 서브1 (이름을 직접 바꿨다면 그 이름은 유지)
+    if (saved.has('subpickle')) {
+      const legacy = saved.get('subpickle');
+      saved.delete('subpickle');
+      if (!saved.has('sub1')) {
+        const keepName = legacy.name && legacy.name !== '서브피클';
+        saved.set('sub1', normalizeMember({
+          ...legacy, id: 'sub1',
+          name: keepName ? legacy.name : '서브1',
+          emoji: legacy.emoji && legacy.emoji !== '🌿' ? legacy.emoji : '🌱',
+          role: legacy.role && legacy.role !== '서브폰 비서 · Pickle' ? legacy.role : '서브피클 1호 · 이동·현장',
+          sort: 2,
+        }));
+      }
+    }
     CFG.MEMBERS.forEach((m) => { if (!saved.has(m.id)) saved.set(m.id, normalizeMember(m)); });
+    // 기본 멤버의 줄 순서는 config 를 따릅니다(서브1·2·3 이 나란히 오도록).
+    CFG.MEMBERS.forEach((m) => { const cur = saved.get(m.id); if (cur) cur.sort = m.sort; });
     state.members = [...saved.values()].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, 'ko'));
+
+    // v1.1 기본 카드·메모를 한 번만 합칩니다.
+    if (data.seedVersion !== SEED_VERSION) {
+      const added = mergeSeed();
+      if (added) {
+        state.messages.push({
+          id: uid(),
+          channel: 'general',
+          authorId: 'system',
+          authorName: '비서실',
+          authorKind: 'system',
+          body: '📣 비서실 v1.1 업데이트 — 서브피클이 🌱 서브1 · 🌿 서브2 · 🍀 서브3 로 나뉘었습니다.\n' +
+                '· 작업실 카드마다 🤝 인수인계 상세(저장소·라이브 URL, 한 일, 이어서 할 일, 주의사항)가 붙었습니다.\n' +
+                '· 🤝 넘기기로 담당을 넘기면 회의실 #종합에 기록이 올라가고, 📋 바통터치 복사로 다른 AI에 바로 붙여넣을 인수인계문을 복사합니다.\n' +
+                '· 진행 중 프로젝트 4종(에디토 · 우리끼리 v23 · 다인이네 숏츠 · 데일리 트렌드 뷰어) 인수인계 카드를 작업실에 넣어 두었습니다.',
+          kind: 'system',
+          meta: { v: '1.1' },
+          createdAt: nowISO(),
+        });
+      }
+      if (added) persist();
+    }
   }
 
   let saveTimer = null;
@@ -130,6 +351,7 @@
         messages: state.messages.slice(-CFG.MAX_MESSAGES),
         tasks: state.tasks,
         memos: state.memos,
+        seedVersion: state.seedVersion || SEED_VERSION,
         savedAt: nowISO(),
       });
     }, 200);
@@ -142,6 +364,7 @@
       messages: state.messages.slice(-CFG.MAX_MESSAGES),
       tasks: state.tasks,
       memos: state.memos,
+      seedVersion: state.seedVersion || SEED_VERSION,
       savedAt: nowISO(),
     });
   }
@@ -160,6 +383,7 @@
     detail: '',
     realtime: 'off',        // 'off' | 'subscribing' | 'on'
     lastSyncAt: 0,
+    noHandoff: false,       // 서버 office_tasks 에 handoff 컬럼이 없을 때
   };
 
   function room() { return settings.room || CFG.ROOM; }
@@ -179,10 +403,17 @@
     };
   }
   function rowToTask(r) {
-    return { id: r.id, title: r.title, assignee: r.assignee || '', status: r.status || 'todo', note: r.note || '', createdAt: r.created_at, updatedAt: r.updated_at };
+    return normalizeTask({
+      id: r.id, title: r.title, assignee: r.assignee || '', status: r.status || 'todo',
+      note: r.note || '', handoff: r.handoff || {},
+      createdAt: r.created_at, updatedAt: r.updated_at,
+    });
   }
   function taskToRow(t) {
-    return { id: t.id, room: room(), title: t.title, assignee: t.assignee || '', status: t.status, note: t.note || '', created_at: t.createdAt, updated_at: t.updatedAt };
+    const row = { id: t.id, room: room(), title: t.title, assignee: t.assignee || '', status: t.status, note: t.note || '', created_at: t.createdAt, updated_at: t.updatedAt };
+    // 서버 표에 handoff 컬럼이 아직 없으면(SQL 미실행) 이 키만 빼고 보냅니다.
+    if (!sync.noHandoff) row.handoff = t.handoff || {};
+    return row;
   }
   function rowToMemo(r) {
     return { id: r.id, title: r.title || '', body: r.body || '', pinned: !!r.pinned, createdAt: r.created_at, updatedAt: r.updated_at };
@@ -213,6 +444,7 @@
   }
 
   let flushing = false;
+  let retrySoon = false;
   async function flushQueue() {
     if (sync.mode !== 'live' || !client || flushing) return;
     flushing = true;
@@ -225,11 +457,21 @@
           if (res && res.error) throw res.error;
           pending.delete(id);
         } catch (e) {
+          const msg = (e && (e.message || e.details || e.hint)) || '';
+          // handoff 컬럼이 없는 예전 표면 그 칸만 빼고 다시 보낸다.
+          if (op.table === 'office_tasks' && /handoff/i.test(String(msg)) && !sync.noHandoff) {
+            sync.noHandoff = true;
+            const { handoff, ...rest } = op.row;
+            pending.set(id, { ...op, row: rest });
+            retrySoon = true;
+            continue;
+          }
           // 다음 폴링에서 다시 시도합니다. (오프라인·일시 오류)
-          console.warn('[office] 전송 대기', op.table, e && e.message ? e.message : e);
+          console.warn('[office] 전송 대기', op.table, msg || e);
         }
       }
     } finally { flushing = false; }
+    if (retrySoon) { retrySoon = false; setTimeout(flushQueue, 0); }
   }
 
   function sigOf(list, fields) {
@@ -282,11 +524,24 @@
 
       // members
       if (!memRes.error) {
-        const remoteMembers = (memRes.data || []).map(rowToMember);
+        const remoteMembers = (memRes.data || [])
+          .map(rowToMember)
+          .filter((m) => {
+            // v1.0 의 단일 '서브피클' 행은 지우고 서브1~3 으로 옮깁니다.
+            if (LEGACY_MEMBER_IDS[m.id]) { queueDelete('office_members', m.id); return false; }
+            return true;
+          });
         if (remoteMembers.length) {
           const pendingMembers = [...pending.values()].filter((p) => p.table === 'office_members');
           const mm = new Map(remoteMembers.map((m) => [m.id, m]));
           state.members.filter((m) => pendingMembers.some((p) => p.id === m.id)).forEach((m) => mm.set(m.id, m));
+          // 새 기본 멤버(서브1·2·3 등)가 서버에 없으면 여기서 추가합니다.
+          CFG.MEMBERS.forEach((cm) => {
+            if (mm.has(cm.id)) { mm.get(cm.id).sort = cm.sort; return; }
+            const added = normalizeMember(cm);
+            mm.set(cm.id, added);
+            queueUpsert('office_members', memberToRow(added), added.id);
+          });
           const mergedMembers = [...mm.values()].sort((a, b) => a.sort - b.sort);
           if (sigOf(mergedMembers, ['id', 'name', 'role', 'status', 'provider']) !== sigOf(state.members, ['id', 'name', 'role', 'status', 'provider'])) {
             state.members = mergedMembers; dirty = true;
@@ -446,11 +701,12 @@
     return full;
   }
 
-  function addTask({ title, assignee, note }) {
-    const t = {
+  function addTask({ title, assignee, note, handoff }) {
+    const t = normalizeTask({
       id: uid(), title: String(title || '').trim().slice(0, 300), assignee: assignee || '',
-      status: 'todo', note: note || '', createdAt: nowISO(), updatedAt: nowISO(),
-    };
+      status: 'todo', note: note || '', handoff: handoff || {},
+      createdAt: nowISO(), updatedAt: nowISO(),
+    });
     if (!t.title) return null;
     state.tasks.unshift(t);
     persist();
@@ -462,7 +718,10 @@
   function updateTask(id, patch, opts) {
     const t = state.tasks.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, patch, { updatedAt: nowISO() });
+    const clean = { ...patch };
+    if ('handoff' in clean) clean.handoff = normalizeHandoff(clean.handoff);
+    if ('assignee' in clean) clean.assignee = LEGACY_MEMBER_IDS[clean.assignee] || clean.assignee;
+    Object.assign(t, clean, { updatedAt: nowISO() });
     persist();
     if (sync.mode === 'live') queueUpsert('office_tasks', taskToRow(t), t.id);
     if (!opts || !opts.silent) emit('tasks');
@@ -573,8 +832,9 @@
     detect, reconnect, pull, room,
     flushPersist,
     uid,
+    normalizeHandoff,
     messagesFor(channelId) { return state.messages.filter((m) => m.channel === channelId); },
-    memberById(id) { return state.members.find((m) => m.id === id); },
+    memberById(id) { const real = LEGACY_MEMBER_IDS[id] || id; return state.members.find((m) => m.id === real); },
     memberByName(name) {
       const n = String(name || '').replace(/^@/, '').replace(/\s*(비서|님)$/, '');
       return state.members.find((m) => m.name === name || m.name === n || m.name.replace(/\s*(비서|님)$/, '') === n);

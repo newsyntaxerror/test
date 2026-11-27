@@ -685,7 +685,7 @@ svg { display: block; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(288px, 1fr));
   gap: 12px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .task {
@@ -747,6 +747,95 @@ svg { display: block; }
   resize: vertical; min-height: 48px; font-size: 12.5px; color: var(--ink);
   line-height: 1.55;
 }
+
+/* ── 인슈인계 상세 · 바통터치 (v1.1) ─────────────────────── */
+.ho-badge {
+  font-size: 11px; line-height: 1;
+  padding: 3px 5px; border-radius: 7px;
+  background: var(--brand-soft); border: 1px solid color-mix(in srgb, var(--brand) 18%, var(--line));
+}
+.ho {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.ho.is-open { background: var(--card); border-color: var(--line-2); }
+.ho-head {
+  width: 100%; display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px; text-align: left;
+  font-size: 12px; font-weight: 700; color: var(--ink-2);
+  transition: background .15s ease, color .15s ease;
+}
+.ho-head:hover { background: var(--brand-soft); color: var(--brand); }
+.ho-sub {
+  margin-left: auto; font-weight: 600; font-size: 11px; color: var(--muted);
+  max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ho-caret { color: var(--muted); font-size: 10px; transition: transform .18s ease; }
+.ho.is-open .ho-caret { transform: rotate(180deg); }
+.ho-body {
+  padding: 2px 11px 11px;
+  border-top: 1px dashed var(--line);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ho-project { font-size: 12.5px; font-weight: 750; color: var(--ink); line-height: 1.45; margin-top: 8px; }
+.ho-facts { display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.ho-facts > div { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 6px; }
+.ho-facts dt { font-size: 10.5px; font-weight: 700; color: var(--muted); padding-top: 1px; }
+.ho-facts dd { margin: 0; font-size: 11.5px; color: var(--ink-2); overflow-wrap: anywhere; line-height: 1.5; }
+.ho-facts a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.ho-block h5 { margin: 0 0 3px; font-size: 10.5px; font-weight: 800; color: var(--brand); letter-spacing: .01em; }
+.ho-block p {
+  margin: 0; font-size: 11.5px; color: var(--ink-2); line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ho-empty { color: var(--muted); font-style: normal; }
+.ho-log { margin: 0; padding-left: 15px; font-size: 11.5px; color: var(--ink-2); line-height: 1.6; }
+.ho-log li { overflow-wrap: anywhere; }
+.ho-edit {
+  align-self: flex-start; font-size: 11px; font-weight: 700; color: var(--muted);
+  border: 1px dashed var(--line-2); border-radius: 8px; padding: 4px 9px;
+}
+.ho-edit:hover { color: var(--brand); border-color: var(--brand-2); background: var(--brand-soft); }
+
+.task-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tool-btn {
+  height: 30px; border-radius: 9px;
+  font-size: 11.5px; font-weight: 750;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: all .15s ease;
+}
+.tool-btn:hover { border-color: var(--brand-2); color: var(--brand); background: var(--brand-soft); }
+.tool-btn.pass { background: var(--brand-soft); border-color: color-mix(in srgb, var(--brand) 20%, var(--line)); color: var(--brand); }
+.tool-btn.pass:hover { background: var(--brand); border-color: transparent; color: var(--on-brand); }
+
+/* 넘기기 시트 */
+.ho-sheet { display: flex; flex-direction: column; gap: 12px; }
+.ho-sheet textarea.input {
+  height: auto; min-height: 92px; padding: 9px 12px;
+  line-height: 1.55; resize: vertical; font-family: var(--font);
+}
+.ho-from { font-size: 13px; font-weight: 700; color: var(--ink); }
+.ho-targets { display: flex; flex-direction: column; gap: 6px; }
+.ho-target {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 11px; border-radius: 11px;
+  border: 1px solid var(--line); background: var(--card); cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.ho-target:hover { border-color: var(--brand-2); }
+.ho-target input { accent-color: var(--brand); margin: 0; flex: 0 0 auto; }
+.ho-target-emoji {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card-2); border: 1px solid var(--line); font-size: 13px; flex: 0 0 auto;
+}
+.ho-target-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ho-target-text b { font-size: 12.5px; font-weight: 750; color: var(--ink); }
+.ho-target-text small { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ho-now { margin-left: auto; font-size: 10px; font-style: normal; font-weight: 700; color: var(--muted); }
+.ho-target:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
 
 .seg {
   display: grid;

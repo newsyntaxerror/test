@@ -1,10 +1,11 @@
 -- =============================================================
---  달콩 비서실 — Supabase 1회 설정
+--  달콩 비서실 — Supabase 1회 설정 (v1.1)
 -- =============================================================
 --  프로젝트: qqaogodxzfiuxhkkfjwt  ('우리끼리'와 같은 프로젝트, 표만 새로 추가)
 --  실행 위치: Supabase Dashboard → SQL Editor → 붙여넣고 RUN
 --
 --  · 만드는 것: office_messages · office_tasks · office_memos · office_members
+--  · v1.1: office_tasks 에 인수인계용 handoff(jsonb) 칸 추가 (표가 이미 있어도 안전)
 --  · 켜는 것: RLS + anon 접근 정책 + Realtime(구독) + 5초 폴링은 앱이 알아서
 --  · 기존 our-map(친구·위치·채팅) 표는 절대 건드리지 않습니다.
 --  · 여러 번 실행해도 안전합니다(if not exists / drop policy if exists).
@@ -37,9 +38,16 @@ create table if not exists public.office_tasks (
   assignee   text,
   status     text not null default 'todo' check (status in ('todo', 'doing', 'done')),
   note       text not null default '',
+  handoff    jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- v1.1 인수인계(바통터치) — 이미 v1.0 으로 표를 만든 경우에도 안전하게 칸만 추가됩니다.
+--   handoff 예시: {"project":"에디토 v1.0","repo":"newsyntaxerror/test","branch":"gh-pages",
+--                 "live":"https://…","done":"…","next":"…","notes":"…","log":[…]}
+alter table public.office_tasks add column if not exists handoff jsonb not null default '{}'::jsonb;
+
 create index if not exists office_tasks_room_idx on public.office_tasks (room, created_at desc);
 
 create table if not exists public.office_memos (
