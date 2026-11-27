@@ -81,6 +81,76 @@ export function fitToSeconds(sections, bpm, targetSec) {
   return out;
 }
 
+const num = (v, fallback) => (typeof v === 'number' && isFinite(v) ? v : fallback);
+const clampNum = (v, a, b, fallback = a) => Math.max(a, Math.min(b, num(v, fallback)));
+
+// ── 가져온 음원 모드의 옹알이 리믹스 패턴 (v1.5) ─────────────────────
+// 내장 신스처럼 "비트에 맞춰 썰린" 느낌을 내기 위해, 구간 종류별로
+//  · 드롭: 1·3박 → 한 박씩 → 마지막 1마디 8분음표 하이퍼 스터터
+//  · 브레이크: 한 마디에 길게 하나
+//  · 인트로/아웃트로: 시작 한 번 + (다음이 드롭이면) 마지막 마디 빌드업 스터터
+// 로 배치한다. 조각은 항상 슬롯 길이 안에서 잘라 써서 원본이 통으로 흐르지 않는다.
+function remixPattern(segs, sections, beat, rate) {
+  const out = [];
+  if (!segs.length) return out;
+  const byLen = segs.slice().sort((a, b) => (a.end - a.start) - (b.end - b.start));
+  const shortest = byLen[0];
+  const longest = byLen[byLen.length - 1];
+  let cursor = 0;
+  const pick = (maxDur) => {
+    const maxSrc = Math.max(0.08, maxDur * rate);
+    for (let k = 0; k < segs.length; k++) {
+      const s = segs[(cursor + k) % segs.length];
+      if (s.end - s.start <= maxSrc) { cursor += k + 1; return s; }
+    }
+    cursor++;
+    return segs[(cursor - 1) % segs.length];
+  };
+  const put = (seg, t, maxDur, tag) => {
+    if (!seg) return;
+    const len = Math.min(seg.end - seg.start, Math.max(0.08, maxDur * rate));
+    out.push({ seg, tStart: t, len, id: `p${seg.id}-${tag}-${out.length}` });
+  };
+  const bar = beat * 4;
+  sections.forEach((sec, si) => {
+    if (!sec.voice || sec.dur <= 0.1) return;
+    const next = sections[si + 1];
+    const lastBar = sec.dur > bar * 1.4 ? sec.start + sec.dur - bar : sec.start;
+    if (sec.kind === 'drop') {
+      const half = sec.start + (lastBar - sec.start) / 2;
+      let t = sec.start;
+      let guard = 0;
+      while (t < lastBar - 0.03 && guard++ < 200) {
+        const step = t < half ? beat * 2 : beat;
+        put(pick(beat * 0.85), t, beat * 0.85, 'd');
+        t += step;
+      }
+      // 마지막 마디: 짧은 조각을 8분음표로 하이퍼 반복
+      let k = 0;
+      while (lastBar + (k * beat) / 2 < sec.end - 0.03 && k < 16) {
+        put(shortest, lastBar + (k * beat) / 2, beat * 0.45, 'h' + k);
+        k++;
+      }
+    } else if (sec.kind === 'break') {
+      let t = sec.start;
+      while (t < sec.end - 0.06) {
+        put(pick(beat * 3.4) || longest, t, beat * 3.4, 'b');
+        t += bar;
+      }
+    } else {
+      put(pick(beat * 1.6) || longest, sec.start, beat * 1.6, 'i');
+      if (next && next.kind === 'drop') {
+        let k = 0;
+        while (lastBar + (k * beat) / 2 < sec.end - 0.03 && k < 16) {
+          put(shortest, lastBar + (k * beat) / 2, beat * 0.45, 'u' + k);
+          k++;
+        }
+      }
+    }
+  });
+  return out;
+}
+
 // 전체 편곡 만들기
 export function buildArrangement(S) {
   const bpm = S.bpm || 140;
@@ -92,32 +162,86 @@ export function buildArrangement(S) {
 
   // ── 목소리 구간 배치 ─────────────────────────────────
   const segs = (S.voice && S.voice.segments ? S.voice.segments : []).filter((s) => s.on && s.end - s.start > 0.04);
+  const byId = new Map(segs.map((s) => [s.id, s]));
+  const vTrack = S.voiceTrack || {};
+  const vOffset = clampNum(vTrack.offset, -2, 6, 0);
+  const vVol = clampNum(vTrack.vol, 0, 1.5, 1);
   const voiceEvents = [];
-  if (segs.length) {
-    let cursor = 0;
-    for (const sec of sections) {
-      if (!sec.voice) continue;
-      let t = sec.start;
-      let guard = 0;
-      while (guard++ < 400) {
-        const seg = segs[cursor % segs.length];
-        const dur = (seg.end - seg.start) / rate;
-        if (t + dur > sec.end + 0.02) break;
-        const slotBeats = Math.max(1, Math.ceil(dur / beat - 0.02));
-        voiceEvents.push({
-          tStart: +t.toFixed(4),
-          tEnd: +(t + dur).toFixed(4),
-          bufStart: seg.start,
-          bufEnd: seg.end,
-          rate,
-          segId: seg.id,
-          sectionKind: sec.kind,
-        });
-        t += slotBeats * beat;
-        cursor++;
+
+  // v1.5: 타임라인에서 손으로 옮긴 조각(voiceClips)이 있으면 그 배치를 그대로 쓴다.
+  //        없으면 기존 자동 배치(구간·박자 슬롯 채우기)를 쓴다.
+  const pushEvent = (seg, tStart, len, gain, id) => {
+    const srcLen = seg.end - seg.start;
+    const useLen = Math.max(0.04, Math.min(srcLen, num(len, srcLen)));
+    const dur = useLen / rate;
+    if (tStart < -0.001 || tStart >= total - 0.02) return;
+    voiceEvents.push({
+      id,
+      segId: seg.id,
+      tStart: +Math.max(0, tStart).toFixed(4),
+      tEnd: +(Math.max(0, tStart) + dur).toFixed(4),
+      bufStart: seg.start,
+      bufEnd: +(seg.start + useLen).toFixed(4),
+      rate,
+      gain: clampNum(gain, 0, 1.5, 1),
+      sectionKind: (sections.find((s) => tStart >= s.start && tStart < s.end) || {}).kind,
+    });
+  };
+
+  const manual = Array.isArray(S.voiceClips) ? S.voiceClips : null;
+  let matched = 0;
+  if (manual) {
+    manual.forEach((c, k) => {
+      const seg = byId.get(c && c.segId);
+      if (!seg) return;
+      matched++;
+      pushEvent(seg, num(c.at, 0) + vOffset, c.len, c.vol, c.id || 'c' + k);
+    });
+  }
+  // 손으로 만든 배치가 이 영상의 구간과 하나도 맞지 않으면(다른 영상·재분석) 자동 배치로 돌아간다.
+  if (!manual || (manual.length > 0 && matched === 0 && segs.length > 0)) {
+    if (segs.length) {
+      if (S.beatMode === 'file' && S.remixPattern !== false) {
+        // v1.5: 가져온 음원 모드 — 노래의 박자 그리드에 맞춰 옹알이를 리듬 있게 썰어 넣는다.
+        for (const p of remixPattern(segs, sections, beat, rate)) {
+          pushEvent(p.seg, p.tStart, p.len, 1, p.id);
+        }
+      } else {
+        let cursor = 0;
+        for (const sec of sections) {
+          if (!sec.voice) continue;
+          let t = sec.start;
+          let guard = 0;
+          while (guard++ < 400) {
+            const seg = segs[cursor % segs.length];
+            const dur = (seg.end - seg.start) / rate;
+            if (t + dur > sec.end + 0.02) break;
+            const slotBeats = Math.max(1, Math.ceil(dur / beat - 0.02));
+            pushEvent(seg, t, seg.end - seg.start, 1, `a${seg.id}-${cursor}`);
+            t += slotBeats * beat;
+            cursor++;
+          }
+        }
       }
     }
   }
+
+  // ── 비트/배경 음원 트랙 (v1.5) ───────────────────────
+  //  시작 지점 · 사용 길이 · 볼륨 · 페이드 인/아웃을 타임라인에서 직접 조절한 값을 그대로 쓴다.
+  const bt = S.beatTrack || {};
+  const beatStart = clampNum(bt.start, 0, Math.max(0, total - 0.2), 0);
+  const lenRaw = num(bt.len, 0);
+  let beatEnd = lenRaw > 0.05 ? Math.min(total, beatStart + lenRaw) : total;
+  if (beatEnd <= beatStart + 0.02) beatEnd = total;
+  const beatTrack = {
+    start: +beatStart.toFixed(4),
+    end: +beatEnd.toFixed(4),
+    len: +(beatEnd - beatStart).toFixed(4),
+    vol: clampNum(bt.vol, 0, 1.5, 1),
+    fadeIn: clampNum(bt.fadeIn, 0, 5, 0),
+    fadeOut: clampNum(bt.fadeOut, 0, 5, 0),
+    srcOffset: clampNum(bt.srcOffset, 0, 30, 0),
+  };
 
   // ── 자동 비트싱크 영상 컷 ────────────────────────────
   const shots = [];
@@ -159,7 +283,8 @@ export function buildArrangement(S) {
   }
 
   return {
-    bpm, beat, bar, total, sections, voiceEvents, shots, fitMode,
+    bpm, beat, bar, total, sections, voiceEvents, shots, fitMode, beatTrack,
+    voiceTrack: { offset: vOffset, vol: vVol },
     beatPlan: sections.map((s) => ({ start: s.start, dur: s.dur, kind: s.kind, beatOn: !!s.beat })),
     cutCount: shots.filter((s) => !s.continuous).length,
   };

@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css?v=1.4.0">
+<link rel="stylesheet" href="css/app.css?v=1.5.0">
 </head>
 <body>
 <div class="app">
@@ -63,13 +63,21 @@
           <span class="row tight"><span id="voiceDur" class="dim"></span><button id="btnChangeVoice" class="ghost sm">다른 영상</button></span>
         </div>
         <canvas id="waveVoice" class="wave"></canvas>
-        <div class="row between">
+        <div class="row between wrap">
           <div class="segcount"><b id="segCount">0</b>개 구간 · 사용 <b id="segOn">0</b></div>
           <div class="row tight">
             <button id="btnEven" class="ghost sm">균등 분할</button>
             <button id="btnAnalyze" class="ghost sm">다시 분석</button>
           </div>
         </div>
+        <div class="fxrow">
+          <span class="fxrow-l">음역 필터</span>
+          <div class="chips small" id="voiceFxChips">
+            <button data-vfx="all" class="on" aria-pressed="true">전체 목소리</button>
+            <button data-vfx="baby" aria-pressed="false">👶 아기 고음 위주</button>
+          </div>
+        </div>
+        <p class="hint" id="voiceFxHint">원본 목소리 그대로예요. 어른 목소리가 섞인 구간은 <b>▶</b>로 들어보고 <b>빠기</b>를 눌러 빼세요.</p>
         <div id="segList" class="seglist"></div>
         <p class="hint" id="segHint" hidden>목소리 구간을 찾지 못했어요. <b>균등 분할</b>로 나눈 뒤 시작점을 조정해 보세요.</p>
       </div>
@@ -125,9 +133,17 @@
             <div class="bpmrow">추정 BPM <b id="bpmEst">–</b>
               <button id="btnBpmApply" class="ghost sm" hidden>적용</button>
             </div>
-            <label class="num"><span>박자 시작</span><input id="offsetBack" type="number" min="0" step="0.01" value="0"><em>초</em></label>
+            <div class="row tight">
+              <label class="num"><span>박자 시작</span><input id="offsetBack" type="number" min="0" step="0.01" value="0"><em>초</em></label>
+              <button id="btnGridAuto" class="ghost sm">🎯 첫 박 자동</button>
+            </div>
           </div>
-          <p class="hint">선택한 구간만 반복해 리믹스에 사용합니다. 박자 시작은 이 구간의 첫 박 위치(오프셋)예요.</p>
+          <p class="hint" id="gridInfo">음원을 올리면 첫 박을 자동으로 찾아 맞춰요.</p>
+          <label class="switchrow compact">
+            <span><b>박자 그리드 리믹스</b><em>옹알이를 노래 박자에 맞춰 썰어 넣기(원본 통재생 없음)</em></span>
+            <input type="checkbox" id="remixPattern" checked>
+          </label>
+          <p class="hint">가져온 음원은 <b>반주</b>로 깔리고, 옹알이는 이 박자 그리드에 맞춰 <b>썰려서</b> 들어가요(원본 통재생 없음). 옹알이가 터질 때 반주가 살짝 줄었다 올라와(덕킹) 한 트랙처럼 붙어요.</p>
         </div>
       </div>
 
@@ -305,6 +321,56 @@
     <!-- 7. 사운드 · 제목 -->
     <section class="card" id="cardMix">
       <h2><b>7</b> 사운드 · 후킹 멘트</h2>
+
+      <div class="tledit">
+        <div class="tlhead">
+          <b>🎛️ 캡컷 타임라인</b>
+          <span id="tlInfo" class="dim">불러오는 중…</span>
+        </div>
+        <div class="tlbody" id="tlBody">
+          <div class="tlruler" id="tlRuler"></div>
+          <div class="tltrack">
+            <span class="tllabel">🎙️<br>옹알이</span>
+            <div class="tllane" id="tlVoiceLane"></div>
+          </div>
+          <div class="tltrack">
+            <span class="tllabel">🎵<br>비트</span>
+            <div class="tllane" id="tlBeatLane"></div>
+          </div>
+          <i class="tlheadline" id="tlHeadLine"></i>
+        </div>
+        <div class="tlfoot">
+          <button id="tlPlay" class="primary sm">▶ 타임라인 듣기</button>
+          <button id="tlAuto" class="ghost sm" hidden>🔄 자동 배치</button>
+          <span class="tlpos" id="tlPos">0.0초</span>
+        </div>
+
+        <div class="tlpanel" id="tlClipPanel" hidden>
+          <div class="tlp-head"><b id="tlpTitle">조각</b><button id="tlpClose" class="ghost sm" aria-label="선택 해제">✕</button></div>
+          <label class="slider"><span>시작</span><input id="tlpAt" type="range" min="0" max="20" step="0.01" value="0"><output id="tlpAtOut">0.00초</output></label>
+          <label class="slider"><span>길이</span><input id="tlpLen" type="range" min="0.1" max="5" step="0.01" value="1"><output id="tlpLenOut">1.00초</output></label>
+          <label class="slider"><span>볼륨</span><input id="tlpVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="tlpVolOut">100%</output></label>
+          <div class="row gap wrap">
+            <button id="tlpPlay" class="ghost sm">▶ 이 조각 들어보기</button>
+            <button id="tlpOff" class="ghost sm">이 구간 빼기</button>
+          </div>
+        </div>
+
+        <details class="tlsl" open>
+          <summary>🎚️ 트랙 슬라이더</summary>
+          <div class="tlsl-head">🎙️ 옹알이 트랙</div>
+          <label class="slider"><span>트랙 시작</span><input id="vtOffset" type="range" min="0" max="3" step="0.05" value="0"><output id="vtOffsetOut">0.00초</output></label>
+          <label class="slider"><span>트랙 볼륨</span><input id="vtVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="vtVolOut">100%</output></label>
+          <div class="tlsl-head">🎵 비트 트랙</div>
+          <label class="slider"><span>시작</span><input id="btStart" type="range" min="0" max="60" step="0.05" value="0"><output id="btStartOut">0.00초</output></label>
+          <label class="slider"><span>사용 길이</span><input id="btLen" type="range" min="0.2" max="60" step="0.1" value="20"><output id="btLenOut">끝까지</output></label>
+          <label class="slider"><span>볼륨</span><input id="btVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="btVolOut">100%</output></label>
+          <label class="slider"><span>페이드 인</span><input id="btFadeIn" type="range" min="0" max="5" step="0.05" value="0"><output id="btFadeInOut">0.00초</output></label>
+          <label class="slider"><span>페이드 아웃</span><input id="btFadeOut" type="range" min="0" max="5" step="0.05" value="0"><output id="btFadeOutOut">0.00초</output></label>
+          <label class="slider"><span>덕킹</span><input id="btDuck" type="range" min="0" max="10" step="0.5" value="5"><output id="btDuckOut">-5.0dB</output></label>
+        </details>
+        <p class="hint">조각을 <b>손가락으로 밀어</b> 위치를, <b>오른쪽 가장자리</b>를 끌어 길이를 바꿔요. 재생선을 누르면 그 위치부터 들을 수 있고, 여기서 맞춘 싱크는 <b>저장 영상(30fps MP4)</b>에 그대로 들어갑니다.</p>
+      </div>
       <label class="field"><span>후킹 1줄</span><input id="title1" class="text" type="text" value="뿌애!" maxlength="40" placeholder="예: 뿌애!"></label>
       <label class="field"><span>후킹 2줄</span><input id="title2" class="text" type="text" value="*140*BPM 테크노 리믹스" maxlength="40" placeholder="예: *140*BPM 테크노 리믹스"></label>
       <div class="sliders">
@@ -347,10 +413,10 @@
 
   <footer class="foot">
     <span>옹알이 리믹스</span>
-    <span id="verLabel">v1.4</span>
+    <span id="verLabel">v1.5</span>
   </footer>
 </div>
 <div id="toast" class="toast" hidden></div>
-<script type="module" src="js/app.js?v=1.4.0"></script>
+<script type="module" src="js/app.js?v=1.5.0"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // 옹알이 리믹스 — 앱 로직
-import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.4.0';
-import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.4.0';
-import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks } from './analyze.js?v=1.4.0';
+import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.5.0';
+import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.5.0';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks, detectGridOffset } from './analyze.js?v=1.5.0';
 import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
 import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
 import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js';
@@ -10,6 +10,7 @@ import { tryYoutube } from './yt.js';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const clampNum = (v, a, b, fallback = a) => (typeof v === 'number' && isFinite(v) ? Math.max(a, Math.min(b, v)) : fallback);
 
 const LS_STATE = 'daini-remix.state.v2';
 
@@ -25,6 +26,13 @@ const S = {
   offsetBack: 0,
   sections: defaultSections(),
   mix: { voiceVol: 1, beatVol: 0.8, reverb: 0.18, pitch: 1 },
+  voiceFx: 'all',       // all = 전체 목소리 · baby = 👶 아기 고음 위주(성인 저음 감쇄)
+  voiceTrack: { offset: 0, vol: 1 },   // 🎙️ 옹알이 트랙 전체 시작 오프셋·볼륨
+  voiceClips: null,     // null = 자동 배치 · [{id, segId, at, len, vol}] = 타임라인에서 손으로 만든 배치
+  beatTrack: { start: 0, len: 0, vol: 1, fadeIn: 0, fadeOut: 0, srcOffset: 0 },   // 🎵 비트 트랙
+  remixPattern: true,   // 가져온 음원 모드에서 박자 그리드 리믹스 패턴 사용
+  beatDuck: 5,          // 옹알이가 터질 때 가져온 음원을 눌러주는 양(dB)
+  gridConf: 0,          // 첫 박 자동 감지 신뢰도
   fmtId: 'ver1',
   fmt: cloneFormat(BUILTINS[0]),
   userFormats: [],
@@ -52,6 +60,8 @@ let playState = null;
 let rafId = 0;
 let staticT = 0.6;
 let drawTimer = 0;
+let segAudio = null;      // 구간 미리듣기(한 번에 하나만)
+const tl = { t: 0, playing: false, state: null, raf: 0, sel: null, drag: null };
 
 // ──────────────────────────────────────────────────────
 // 오디오 컨텍스트
@@ -408,13 +418,37 @@ async function getBeatBuffer(ctx, arr) {
 }
 
 // ──────────────────────────────────────────────────────
+// 목소리 음역 필터 (v1.5) — 미리듣기·오프라인 믹스·MP4 내보내기가 같은 체인을 쓴다.
+//  · 전체 목소리: 그대로
+//  · 👶 아기 고음 위주: highpass 320Hz(성인 저음 감쇄) + peaking 700Hz -9dB(저역 웅웅 담당)
+function voiceFxChain(ctx, src, dst) {
+  if (S.voiceFx !== 'baby') { src.connect(dst); return null; }
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 320;
+  hp.Q.value = 0.707;
+  const pk = ctx.createBiquadFilter();
+  pk.type = 'peaking';
+  pk.frequency.value = 700;
+  pk.Q.value = 1.1;
+  pk.gain.value = -9;
+  src.connect(hp);
+  hp.connect(pk);
+  pk.connect(dst);
+  return [hp, pk];
+}
+
+// ──────────────────────────────────────────────────────
 // 믹스 스케줄 (미리듣기 = 실시간, WAV = 오프라인 공용)
-function scheduleMix(ctx, out, arr, t0, beatBuf) {
+// opts.from: 타임라인의 어느 지점(초)부터 재생할지 — 플레이헤드 미리듣기용
+function scheduleMix(ctx, out, arr, t0, beatBuf, opts = {}) {
   const stops = [];
+  const from = clampNum(opts.from, 0, Math.max(0, arr.total - 0.02), 0);
+  const endAt = t0 + Math.max(0.02, arr.total - from);
   const master = ctx.createGain();
-  master.gain.value = 0.9;
-  master.gain.setValueAtTime(0.9, t0 + Math.max(0.1, arr.total - 0.06));
-  master.gain.linearRampToValueAtTime(0.0001, t0 + arr.total + 0.02);
+  master.gain.setValueAtTime(0.9, t0);
+  master.gain.setValueAtTime(0.9, Math.max(t0 + 0.02, endAt - 0.06));
+  master.gain.linearRampToValueAtTime(0.0001, endAt + 0.02);
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -14;
   comp.knee.value = 20;
@@ -434,52 +468,99 @@ function scheduleMix(ctx, out, arr, t0, beatBuf) {
     wetGain.connect(master);
   }
 
-  // 반주
-  if (S.beatMode === 'file' && S.backing) {
-    const src = ctx.createBufferSource();
-    src.buffer = S.backing.buffer;
-    const g = ctx.createGain();
-    g.gain.value = S.mix.beatVol * (S.backing.norm || 1);
-    src.connect(g); g.connect(master);
-    const trimStart = clamp(S.trim.start, 0, Math.max(0, S.backing.duration - 0.2));
-    const trimEnd = clamp(S.trim.end, trimStart + 0.25, S.backing.duration);
-    const startAt = clamp(trimStart + S.offsetBack, trimStart, trimEnd - 0.2);
-    const loopEnd = Math.min(trimEnd, startAt + arr.bar * 4);
-    src.loop = true;
-    src.loopStart = startAt;
-    src.loopEnd = Math.max(startAt + 0.2, loopEnd);
-    src.start(t0, startAt);
-    src.stop(t0 + arr.total + 0.05);
-    stops.push(src);
-  } else if (beatBuf) {
-    const src = ctx.createBufferSource();
-    src.buffer = beatBuf;
-    const g = ctx.createGain();
-    g.gain.value = S.mix.beatVol;
-    src.connect(g); g.connect(master);
-    src.start(t0, 0, Math.min(arr.total + 0.05, beatBuf.duration));
-    stops.push(src);
+  // 반주 — 🎵 비트 트랙(시작 오프셋·사용 길이·볼륨·페이드 인/아웃)
+  const bt = arr.beatTrack || { start: 0, end: arr.total, len: arr.total, vol: 1, fadeIn: 0, fadeOut: 0, srcOffset: 0 };
+  const bStart = Math.max(bt.start, from);
+  const bEnd = Math.min(bt.end, arr.total);
+  const bSpan = bEnd - bStart;
+  if (bSpan > 0.03) {
+    const at = t0 + (bStart - from);
+    const bg = ctx.createGain();
+    const norm = (S.beatMode === 'file' && S.backing) ? (S.backing.norm || 1) : 1;
+    const bVol = Math.max(0.0001, S.mix.beatVol * (bt.vol == null ? 1 : bt.vol) * norm);
+    const fi = bStart <= bt.start + 0.005 ? Math.min(bt.fadeIn || 0, bSpan * 0.5) : 0;
+    const fo = Math.min(bt.fadeOut || 0, bSpan * 0.5);
+    bg.gain.setValueAtTime(fi > 0 ? 0.0001 : bVol, at);
+    if (fi > 0) bg.gain.linearRampToValueAtTime(bVol, at + fi);
+    if (fo > 0) {
+      bg.gain.setValueAtTime(bVol, Math.max(at + fi, at + bSpan - fo));
+      bg.gain.linearRampToValueAtTime(0.0001, at + bSpan);
+    }
+    // 사이드체인 덕킹: 옹알이 조각이 터지는 순간 가져온 음원을 -4~-6dB 눌렀다가 천천히 올린다.
+    const duckDb = clampNum(S.beatDuck, 0, 12, 0);
+    if (S.beatMode === 'file' && duckDb > 0.2) {
+      const duck = Math.pow(10, -duckDb / 20);
+      for (const ev of arr.voiceEvents) {
+        const evDur = (ev.bufEnd - ev.bufStart) / (ev.rate || 1);
+        const s0 = Math.max(ev.tStart, bStart);
+        const e0 = Math.min(ev.tStart + evDur, bEnd);
+        if (e0 - s0 < 0.05) continue;
+        let at0 = t0 + (s0 - from) - 0.03;
+        const minAt = at + (fi > 0 ? fi : 0);
+        if (at0 < minAt) at0 = minAt;
+        if (at0 > endAt - 0.05) continue;
+        bg.gain.setValueAtTime(Math.max(0.0001, bVol * duck), at0);
+        bg.gain.linearRampToValueAtTime(bVol, Math.min(endAt, at0 + 0.16));
+      }
+    }
+    bg.connect(master);
+    let bsrc = null;
+    if (S.beatMode === 'file' && S.backing) {
+      bsrc = ctx.createBufferSource();
+      bsrc.buffer = S.backing.buffer;
+      bsrc.connect(bg);
+      const tA = clamp(S.trim.start, 0, Math.max(0, S.backing.duration - 0.2));
+      const tB = clamp(S.trim.end, tA + 0.25, S.backing.duration);
+      const srcStart = clamp(tA + S.offsetBack + (bt.srcOffset || 0), tA, tB - 0.2);
+      const loopEnd = Math.min(tB, srcStart + arr.bar * 4);
+      const loopLen = Math.max(0.2, loopEnd - srcStart);
+      bsrc.loop = true;
+      bsrc.loopStart = srcStart;
+      bsrc.loopEnd = Math.max(srcStart + 0.2, loopEnd);
+      let phase = (bStart - bt.start) % loopLen;
+      if (phase < 0) phase += loopLen;
+      bsrc.start(at, srcStart + phase);
+      bsrc.stop(at + bSpan + 0.03);
+      stops.push(bsrc);
+    } else if (beatBuf) {
+      bsrc = ctx.createBufferSource();
+      bsrc.buffer = beatBuf;
+      bsrc.connect(bg);
+      const off = Math.max(0, bStart - bt.start);
+      bsrc.start(at, Math.min(off, Math.max(0, beatBuf.duration - 0.05)), Math.min(bSpan, Math.max(0, beatBuf.duration - off)));
+      stops.push(bsrc);
+    }
+    stops.push({ stop() { try { bg.disconnect(); } catch (e) {} } });
   }
 
-  // 목소리 구간
+  // 목소리 구간 — 조각별 볼륨(ev.gain) · 트랙 볼륨 · 음역 필터
   if (S.voice && S.voice.buffer) {
+    const trackVol = clampNum(S.voiceTrack && S.voiceTrack.vol, 0, 1.5, 1);
     for (const ev of arr.voiceEvents) {
-      const dur = (ev.bufEnd - ev.bufStart) / ev.rate;
-      const at = t0 + ev.tStart;
+      const rate = ev.rate || 1;
+      const evDur = (ev.bufEnd - ev.bufStart) / rate;
+      const evEnd = ev.tStart + evDur;
+      if (evEnd <= from + 0.002) continue;
+      const skip = Math.max(0, from - ev.tStart);
+      const dur = evDur - skip;
+      if (dur < 0.02) continue;
+      const bufStart = ev.bufStart + skip * rate;
+      const at = t0 + Math.max(0, ev.tStart - from);
       const src = ctx.createBufferSource();
       src.buffer = S.voice.buffer;
-      try { src.playbackRate.value = ev.rate; } catch (e) {}
+      try { src.playbackRate.value = rate; } catch (e) {}
       const g = ctx.createGain();
-      const vg = Math.max(0.0001, S.mix.voiceVol);
+      const vg = Math.max(0.0001, S.mix.voiceVol * (ev.gain == null ? 1 : ev.gain) * trackVol);
       g.gain.setValueAtTime(0.0001, at);
       g.gain.linearRampToValueAtTime(vg, at + Math.min(0.012, dur * 0.2));
       g.gain.setValueAtTime(vg, at + Math.max(0.013, dur - 0.025));
       g.gain.linearRampToValueAtTime(0.0001, at + dur);
-      src.connect(g);
+      const chain = voiceFxChain(ctx, src, g);
+      if (chain) stops.push({ stop() { for (const f of chain) { try { f.disconnect(); } catch (e) {} } } });
       g.connect(master);
       if (conv) { const send = ctx.createGain(); send.gain.value = S.mix.reverb; g.connect(send); send.connect(conv); }
       try {
-        src.start(at, ev.bufStart, ev.bufEnd - ev.bufStart);
+        src.start(at, Math.min(bufStart, Math.max(0, S.voice.buffer.duration - 0.01)), dur * rate);
         src.stop(at + dur + 0.04);
       } catch (e) {}
       stops.push(src);
@@ -497,27 +578,36 @@ function scheduleMix(ctx, out, arr, t0, beatBuf) {
 
 // ──────────────────────────────────────────────────────
 // 미리보기 재생
+let previewBusy = false;
+
 async function play() {
   if (playing) { stopPlayback(); return; }
   if (!S.voice && !S.videoUrl && !(S.beatMode === 'file' && S.backing)) {
     toast('먼저 다인 영상을 올려 주세요');
     return;
   }
-  const ctx = audioCtx();
-  try { await ctx.resume(); } catch (e) {}
-  const arr = rebuild();
-  if (!arr.total) return;
-  const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
-  stopPlayback(true);
-  const t0 = ctx.currentTime + 0.35;
-  const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf);
-  playState = { t0, mix, arr, start: performance.now() };
-  playing = true;
-  el.btnPlay.textContent = '■ 정지';
-  el.btnStop.hidden = false;
-  el.playDot.classList.add('on');
-  await engine.startAt(0);
-  loop();
+  if (previewBusy) return;
+  previewBusy = true;
+  stopAllPreviewAudio();
+  try {
+    const ctx = audioCtx();
+    try { await ctx.resume(); } catch (e) {}
+    const arr = rebuild();
+    if (!arr.total) return;
+    const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
+    stopAllPreviewAudio();
+    const t0 = ctx.currentTime + 0.35;
+    const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf);
+    playState = { t0, mix, arr, start: performance.now() };
+    playing = true;
+    el.btnPlay.textContent = '■ 정지';
+    el.btnStop.hidden = false;
+    el.playDot.classList.add('on');
+    await engine.startAt(0);
+    loop();
+  } finally {
+    previewBusy = false;
+  }
 }
 
 function loop() {
@@ -533,6 +623,7 @@ function loop() {
   drawScene(el.previewCtx, sc);
   el.playerTime.textContent = show.toFixed(1);
   el.progressBar.style.width = `${clamp((show / arr.total) * 100, 0, 100)}%`;
+  setPlayhead(show);
   rafId = requestAnimationFrame(loop);
 }
 
@@ -556,6 +647,7 @@ function stopPlayback(silent) {
 // 파일 처리
 async function onVoiceFile(file) {
   if (!file) return;
+  stopAllPreviewAudio();
   setStatus('영상을 분석하는 중…');
   const isVideo = /^video\//.test(file.type) || /\.(mp4|mov|m4v|webm|ogv)$/i.test(file.name);
   const url = URL.createObjectURL(file);
@@ -656,15 +748,16 @@ function renderSegments() {
   list.innerHTML = '';
   segs.forEach((s, i) => {
     const row = document.createElement('div');
-    row.className = 'seg' + (s.on ? '' : ' off');
+    row.className = 'seg' + (s.on ? '' : ' off') + (segAudio && segAudio.i === i ? ' playing' : '');
+    row.dataset.i = String(i);
     row.innerHTML = `
-      <input type="checkbox" data-i="${i}" ${s.on ? 'checked' : ''} aria-label="구간 사용">
-      <div class="time">${s.start.toFixed(2)}–${s.end.toFixed(2)}<em>${(s.end - s.start).toFixed(2)}초</em></div>
+      <button class="playseg" data-play="${i}" aria-label="${i + 1}번 구간 들어보기" title="들어보기">${segAudio && segAudio.i === i ? '■' : '▶'}</button>
+      <div class="time"><b>${i + 1}</b> ${s.start.toFixed(2)}–${s.end.toFixed(2)}<em>${(s.end - s.start).toFixed(2)}초</em></div>
       <div class="nudge">
         <button class="mini" data-nudge="-1" data-i="${i}" title="시작점 50ms 앞으로" aria-label="시작 50ms 앞으로">◀</button>
         <button class="mini" data-nudge="1" data-i="${i}" title="시작점 50ms 뒤로" aria-label="시작 50ms 뒤로">▶</button>
       </div>
-      <button class="mini" data-play="${i}" title="이 구간만 듣기" aria-label="이 구간 듣기">▶|</button>`;
+      <button class="usebtn ${s.on ? 'on' : ''}" data-use="${i}" aria-pressed="${s.on ? 'true' : 'false'}" title="${s.on ? '리믹스에서 빠기' : '리믹스에 넣기'}">${s.on ? '넣음' : '빠짐'}</button>`;
     list.appendChild(row);
   });
   el.segCount.textContent = String(segs.length);
@@ -675,6 +768,7 @@ function renderSegments() {
 function nudgeSeg(i, dir) {
   const s = S.voice && S.voice.segments[i];
   if (!s) return;
+  stopSegAudio();
   const d = 0.05 * dir;
   const len = s.end - s.start;
   s.start = clamp(s.start + d, 0, Math.max(0, S.voice.duration - len - 0.01));
@@ -684,18 +778,42 @@ function nudgeSeg(i, dir) {
   rebuild();
 }
 
+// 한 번에 하나만 — 다른 구간을 누르면 이전 재생은 자동으로 멈춘다
+function stopSegAudio() {
+  if (segAudio) {
+    const a = segAudio;
+    segAudio = null;
+    try { a.src.onended = null; } catch (e) {}
+    try { a.src.stop(); } catch (e) {}
+    try { a.src.disconnect(); } catch (e) {}
+    try { a.g.disconnect(); } catch (e) {}
+    if (a.chain) for (const f of a.chain) { try { f.disconnect(); } catch (e) {} }
+  }
+  if (el.segList) {
+    el.segList.querySelectorAll('.seg.playing').forEach((r) => r.classList.remove('playing'));
+    el.segList.querySelectorAll('[data-play]').forEach((b) => { b.textContent = '▶'; });
+  }
+}
+
 function playSegment(i) {
+  if (segAudio && segAudio.i === i) { stopSegAudio(); return; }
+  stopAllPreviewAudio();
   const s = S.voice && S.voice.segments[i];
   if (!s) return;
   const ctx = audioCtx();
-  ctx.resume();
+  try { ctx.resume(); } catch (e) {}
   const src = ctx.createBufferSource();
   src.buffer = S.voice.buffer;
   const g = ctx.createGain();
-  g.gain.value = S.mix.voiceVol;
-  src.connect(g); g.connect(ctx.destination);
-  src.start(0, s.start, s.end - s.start);
-  toast(`구간 ${i + 1} · ${(s.end - s.start).toFixed(2)}초`);
+  g.gain.value = clampNum(S.mix.voiceVol * clampNum(S.voiceTrack && S.voiceTrack.vol, 0, 1.5, 1), 0.0001, 2);
+  const chain = voiceFxChain(ctx, src, g);
+  g.connect(ctx.destination);
+  const dur = Math.min(s.end - s.start, 10);
+  src.start(0, s.start, dur);
+  segAudio = { i, src, g, chain };
+  src.onended = () => { if (segAudio && segAudio.src === src) stopSegAudio(); };
+  renderSegments();
+  toast(`${i + 1}번 구간 ${dur.toFixed(2)}초 · ${S.voiceFx === 'baby' ? '아기 고음 위주' : '전체 목소리'}`);
 }
 
 function evenSplit() {
@@ -726,8 +844,37 @@ function reanalyze() {
   toast(`${S.voice.segments.length}개 구간을 다시 찾았어요`);
 }
 
+// ── 가져온 음원의 첫 박(다운비트)을 자동으로 찾아 박자 그리드에 맞춘다 (v1.5)
+let gridTimer = 0;
+
+function applyGrid(silent) {
+  if (!S.backing) {
+    if (!silent) toast('먼저 음원을 올려 주세요');
+    return;
+  }
+  let res = { offset: S.offsetBack || 0, confidence: 0, beats: 0 };
+  try { res = detectGridOffset(S.backing.buffer, S.trim.start, S.trim.end, S.bpm || 128); } catch (e) {}
+  if (res.confidence >= 0.08 || !S.offsetBack) {
+    S.offsetBack = clamp(res.offset, 0, 60 / (S.bpm || 128));
+  }
+  S.gridConf = res.confidence;
+  if (el.offsetBack) el.offsetBack.value = S.offsetBack.toFixed(2);
+  if (el.gridInfo) {
+    el.gridInfo.innerHTML = `첫 박 <b>+${S.offsetBack.toFixed(2)}초</b> · 신뢰도 ${Math.round(res.confidence * 100)}%<br>옹알이 조각이 이 박자 그리드에 맞춰 썰려서 들어가요.`;
+  }
+  rebuild();
+  saveState();
+  if (!silent) toast(`🎯 첫 박을 ${S.offsetBack.toFixed(2)}초로 맞췄어요`);
+}
+
+function scheduleGrid() {
+  clearTimeout(gridTimer);
+  gridTimer = setTimeout(() => { if (S.backing) applyGrid(true); }, 260);
+}
+
 async function onBackFile(file) {
   if (!file) return;
+  stopAllPreviewAudio();
   setStatus('음원을 분석하는 중…');
   const ctx = audioCtx();
   try {
@@ -753,8 +900,19 @@ async function onBackFile(file) {
     el.bpmEst.textContent = est ? `${est.bpm}` : '–';
     el.btnBpmApply.hidden = !est;
     el.btnBpmApply.dataset.bpm = est ? String(est.bpm) : '';
+    // 추정 BPM을 그대로 쓰면 박자 그리드·컷이 노래와 어긋난다 → 신뢰도가 있으면 자동 적용
+    if (est && est.bpm && Math.abs(est.bpm - S.bpm) > 0.5) {
+      const keepTotal = S.arr ? S.arr.total : 0;
+      S.bpm = clamp(Math.round(est.bpm), 90, 160);
+      el.bpm.value = String(S.bpm);
+      el.bpmOut.textContent = String(S.bpm);
+      fitAutoTitles();
+      if (keepTotal > 2) S.sections = fitToSeconds(S.sections, S.bpm, keepTotal);
+      toast(`추정 BPM ${S.bpm}로 박자를 자동으로 맞췄어요`);
+    }
+    applyGrid(true);
     rebuild();
-    setStatus(`${file.name} · ${buf.duration.toFixed(1)}초${est ? ` · 추정 ${est.bpm} BPM` : ''}`);
+    setStatus(`${file.name} · ${buf.duration.toFixed(1)}초${est ? ` · 추정 ${est.bpm} BPM` : ''} · 첫 박 +${(S.offsetBack || 0).toFixed(2)}초`);
     toast('음원을 불러왔어요. 쓸 구간을 골라 주세요');
   } catch (e) {
     const why = (e && (e.userMessage || e.message)) || '이 파일의 오디오를 읽지 못했어요 (MP3/M4A/WAV 권장)';
@@ -770,6 +928,538 @@ function drawBackWave() {
     selection: { start: S.trim.start, end: S.trim.end },
     color: 'rgba(0,245,212,.55)',
   });
+}
+
+// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
+// 미리듣기 오디오 단일 관리 (v1.5)
+//  · 구간 ▶, 내 음원 '이 구간 듣기', 타임라인 듣기, 전체 미리보기가
+//    절대 겹쳐 울리지 않도록 새 소리를 내기 전에 항상 stopAllPreviewAudio()를 부른다.
+const previewPool = new Set();
+
+function stopOneShotAudio() {
+  for (const rec of previewPool) {
+    try { rec.src.onended = null; } catch (e) {}
+    try { rec.src.stop(); } catch (e) {}
+    try { rec.src.disconnect(); } catch (e) {}
+    try { rec.g.disconnect(); } catch (e) {}
+  }
+  previewPool.clear();
+}
+
+function playOneShot(buffer, offset, dur, vol) {
+  if (!buffer) return null;
+  const ctx = audioCtx();
+  try { ctx.resume(); } catch (e) {}
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const g = ctx.createGain();
+  g.gain.value = clampNum(vol, 0.0001, 2);
+  src.connect(g);
+  g.connect(ctx.destination);
+  const rec = { src, g };
+  previewPool.add(rec);
+  src.onended = () => { previewPool.delete(rec); try { g.disconnect(); } catch (e) {} };
+  const off = clamp(offset, 0, Math.max(0, buffer.duration - 0.01));
+  src.start(0, off, Math.max(0.01, Math.min(dur, buffer.duration - off)));
+  return rec;
+}
+
+// 앱 안의 모든 미리듣기(구간 · 원본 구간 · 타임라인 · 전체 미리보기)를 즉시 정리
+function stopAllPreviewAudio() {
+  stopSegAudio();
+  stopOneShotAudio();
+  tlStop(true);
+  if (playing) stopPlayback(true);
+  try {
+    document.querySelectorAll('audio').forEach((a) => { a.pause(); a.currentTime = 0; });
+  } catch (e) {}
+}
+
+// 🎛️ 캡컷 스타일 멀티트랙 타임라인 (v1.5)
+//  위: 🎙️ 옹알이 조각들 · 아래: 🎵 비트/배경 음원
+//  손가락(pointer)으로 밀어 위치·길이를 바꾸고, 재생선으로 바로 들어본다.
+//  여기서 만든 배치는 scheduleMix를 그대로 거쳐 미리듣기·WAV·MP4에 100% 반영된다.
+function clipList() {
+  return Array.isArray(S.voiceClips) ? S.voiceClips : null;
+}
+
+function clipById(id) {
+  const list = clipList();
+  return list ? list.find((c) => c.id === id) : null;
+}
+
+function segById(id) {
+  return S.voice ? S.voice.segments.find((s) => s.id === id) : null;
+}
+
+// 지금 화면에 보이는 자동 배치를 손으로 만질 수 있는 조각(clip) 목록으로 바꿔 둔다.
+function materializeClips() {
+  if (clipList() || !S.arr) return;
+  const off = clampNum(S.voiceTrack && S.voiceTrack.offset, -2, 6, 0);
+  S.voiceClips = S.arr.voiceEvents.map((ev, i) => ({
+    id: ev.id || 'c' + i,
+    segId: ev.segId,
+    at: +Math.max(0, ev.tStart - off).toFixed(4),
+    len: +(ev.bufEnd - ev.bufStart).toFixed(4),
+    vol: ev.gain == null ? 1 : ev.gain,
+  }));
+}
+
+function renderTimeline() {
+  const arr = S.arr;
+  if (!arr || !el.tlVoiceLane) return;
+  const total = Math.max(0.2, arr.total);
+  const pct = (t) => `${(clamp(t, 0, total) / total) * 100}%`;
+
+  // 눈금
+  if (el.tlRuler) {
+    el.tlRuler.innerHTML = '';
+    const step = total <= 12 ? 1 : total <= 30 ? 2 : 5;
+    for (let s = 0; s <= total + 0.001; s += step) {
+      const tick = document.createElement('i');
+      tick.className = 'tl-tick';
+      tick.style.left = pct(s);
+      tick.innerHTML = `<span>${s.toFixed(0)}</span>`;
+      el.tlRuler.appendChild(tick);
+    }
+    const endTick = document.createElement('i');
+    endTick.className = 'tl-tick end';
+    endTick.style.left = '100%';
+    el.tlRuler.appendChild(endTick);
+  }
+
+  // 🎙️ 옹알이 트랙
+  el.tlVoiceLane.innerHTML = '';
+  if (!arr.voiceEvents.length) {
+    const hint = document.createElement('span');
+    hint.className = 'tl-empty';
+    hint.textContent = S.voice ? '넣은 구간이 없어요 · 구간을 켜 주세요' : '영상을 올리면 목소리 조각이 여기에 놓여요';
+    el.tlVoiceLane.appendChild(hint);
+  }
+  arr.voiceEvents.forEach((ev, i) => {
+    const dur = Math.max(0.04, ev.tEnd - ev.tStart);
+    const w = (dur / total) * 100;
+    const b = document.createElement('div');
+    b.className = 'tlclip' + (w < 7.5 ? ' narrow' : '') + (tl.sel === ev.id ? ' sel' : '') + ((ev.gain == null ? 1 : ev.gain) < 0.02 ? ' mute' : '');
+    b.dataset.id = ev.id;
+    b.dataset.kind = 'voice';
+    b.style.left = pct(ev.tStart);
+    b.style.width = `${w}%`;
+    b.title = `조각 ${i + 1} · ${ev.tStart.toFixed(2)}–${ev.tEnd.toFixed(2)}초 · 볼륨 ${Math.round((ev.gain == null ? 1 : ev.gain) * 100)}%`;
+    b.innerHTML = `<span class="tlclip-t">🎙️${i + 1}</span><i class="tlh tlh-r" data-h="r"></i>`;
+    el.tlVoiceLane.appendChild(b);
+  });
+
+  // 🎵 비트 트랙
+  el.tlBeatLane.innerHTML = '';
+  const bt = arr.beatTrack;
+  const beat = document.createElement('div');
+  beat.className = 'tlbeat' + (tl.sel === 'beat' ? ' sel' : '');
+  beat.dataset.id = 'beat';
+  beat.dataset.kind = 'beat';
+  beat.style.left = pct(bt.start);
+  beat.style.width = `${(Math.max(0.1, bt.len) / total) * 100}%`;
+  const beatName = S.beatMode === 'synth'
+    ? `${GENRES[S.genre].label} ${S.bpm} BPM`
+    : (S.backing ? S.backing.name.replace(/\.[a-z0-9]+$/i, '') : '내 음원');
+  beat.title = `비트 ${bt.start.toFixed(2)}–${bt.end.toFixed(2)}초 · 볼륨 ${Math.round((bt.vol == null ? 1 : bt.vol) * 100)}%`;
+  beat.innerHTML = `<span class="tlclip-t">🎵 ${beatName}</span><i class="tlh tlh-l" data-h="l"></i><i class="tlh tlh-r" data-h="r"></i>`;
+  el.tlBeatLane.appendChild(beat);
+
+  if (el.tlInfo) {
+    el.tlInfo.textContent = `총 ${total.toFixed(1)}초 · 조각 ${arr.voiceEvents.length}개 · 비트 ${bt.start.toFixed(1)}–${bt.end.toFixed(1)}초`;
+  }
+  if (el.tlAuto) el.tlAuto.hidden = !clipList();
+  syncTlSliders();
+  setPlayhead(tl.t);
+  updateTlPanel();
+}
+
+function syncTlSliders() {
+  const arr = S.arr;
+  if (!arr || !el.vtOffset) return;
+  const total = Math.max(0.2, arr.total);
+  const vt = S.voiceTrack || {};
+  const bt = S.beatTrack || {};
+  el.vtOffset.max = '3';
+  el.vtOffset.value = String(clampNum(vt.offset, 0, 3, 0));
+  el.vtOffsetOut.textContent = `${clampNum(vt.offset, 0, 3, 0).toFixed(2)}초`;
+  el.vtVol.value = String(clampNum(vt.vol, 0, 1.5, 1));
+  el.vtVolOut.textContent = `${Math.round(clampNum(vt.vol, 0, 1.5, 1) * 100)}%`;
+
+  el.btStart.max = total.toFixed(1);
+  el.btStart.value = String(clampNum(bt.start, 0, total, 0));
+  el.btStartOut.textContent = `${clampNum(bt.start, 0, total, 0).toFixed(2)}초`;
+  el.btLen.max = total.toFixed(1);
+  const len = clampNum(bt.len, 0, total, 0);
+  el.btLen.value = String(len > 0.05 ? len : total);
+  el.btLenOut.textContent = len > 0.05 ? `${len.toFixed(2)}초` : '끝까지';
+  el.btVol.value = String(clampNum(bt.vol, 0, 1.5, 1));
+  el.btVolOut.textContent = `${Math.round(clampNum(bt.vol, 0, 1.5, 1) * 100)}%`;
+  el.btFadeIn.value = String(clampNum(bt.fadeIn, 0, 5, 0));
+  el.btFadeInOut.textContent = `${clampNum(bt.fadeIn, 0, 5, 0).toFixed(2)}초`;
+  el.btFadeOut.value = String(clampNum(bt.fadeOut, 0, 5, 0));
+  el.btFadeOutOut.textContent = `${clampNum(bt.fadeOut, 0, 5, 0).toFixed(2)}초`;
+  if (el.btDuck) {
+    const d = clampNum(S.beatDuck, 0, 10, 0);
+    el.btDuck.value = String(d);
+    el.btDuckOut.textContent = d < 0.2 ? '끔' : `-${d.toFixed(1)}dB`;
+  }
+  if (el.gridInfo) {
+    el.gridInfo.innerHTML = S.backing
+      ? `첫 박 <b>+${(S.offsetBack || 0).toFixed(2)}초</b> · 신뢰도 ${Math.round((S.gridConf || 0) * 100)}%<br>옹알이 조각이 이 박자 그리드에 맞춰 썰려서 들어가요.`
+      : '음원을 올리면 첫 박을 자동으로 찾아 맞춰요.';
+  }
+}
+
+function setPlayhead(t) {
+  const arr = S.arr;
+  if (!el.tlHeadLine || !arr || !el.tlVoiceLane || !el.tlBody) return;
+  const total = Math.max(0.2, arr.total);
+  const lane = el.tlVoiceLane;
+  const body = el.tlBody;
+  const left = (lane.offsetLeft || 0) + (clamp(t, 0, total) / total) * (lane.clientWidth || 1);
+  el.tlHeadLine.style.left = `${left}px`;
+  el.tlHeadLine.style.opacity = '1';
+  if (el.tlPos) el.tlPos.textContent = `${clamp(t, 0, total).toFixed(1)} / ${total.toFixed(1)}초`;
+  if (el.tlRuler) el.tlRuler.style.setProperty('--head', `${(clamp(t, 0, total) / total) * 100}%`);
+  void body;
+}
+
+function updateTlPanel() {
+  const panel = el.tlClipPanel;
+  if (!panel) return;
+  const arr = S.arr;
+  if (!arr || !tl.sel) { panel.hidden = true; return; }
+  if (tl.sel === 'beat') {
+    panel.hidden = false;
+    el.tlpTitle.textContent = '🎵 비트 트랙';
+    el.tlpPlay.textContent = '▶ 비트만 들어보기';
+    el.tlpOff.hidden = true;
+    return;
+  }
+  const ev = arr.voiceEvents.find((e) => e.id === tl.sel);
+  if (!ev) { panel.hidden = true; return; }
+  const idx = arr.voiceEvents.indexOf(ev);
+  const clip = clipById(ev.id);
+  const seg = segById(ev.segId);
+  const maxLen = seg ? (seg.end - seg.start) / (ev.rate || 1) : 5;
+  panel.hidden = false;
+  el.tlpTitle.textContent = `🎙️ 조각 ${idx + 1} · ${ev.tStart.toFixed(2)}–${ev.tEnd.toFixed(2)}초`;
+  el.tlpAt.max = Math.max(0.1, arr.total - 0.1).toFixed(2);
+  el.tlpAt.value = String(clampNum(ev.tStart - clampNum(S.voiceTrack && S.voiceTrack.offset, -2, 6, 0), 0, arr.total, 0));
+  el.tlpAtOut.textContent = `${(+el.tlpAt.value).toFixed(2)}초`;
+  el.tlpLen.max = maxLen.toFixed(2);
+  el.tlpLen.value = String(Math.min(maxLen, (ev.bufEnd - ev.bufStart) / (ev.rate || 1)));
+  el.tlpLenOut.textContent = `${(+el.tlpLen.value).toFixed(2)}초`;
+  el.tlpVol.value = String(clampNum(ev.gain, 0, 1.5, 1));
+  el.tlpVolOut.textContent = `${Math.round(clampNum(ev.gain, 0, 1.5, 1) * 100)}%`;
+  el.tlpPlay.textContent = '▶ 이 조각 들어보기';
+  el.tlpOff.hidden = false;
+  el.tlpOff.textContent = '이 구간 빼기';
+  void clip;
+}
+
+// ── 타임라인 미리듣기(오디오) + 재생선
+async function tlPlayToggle() {
+  if (tl.playing) { tlStop(); return; }
+  if (previewBusy) return;
+  previewBusy = true;
+  stopAllPreviewAudio();
+  try {
+    const ctx = audioCtx();
+    try { await ctx.resume(); } catch (e) {}
+    const arr = rebuild();
+    if (!arr.total) return;
+    const from = clampNum(tl.t, 0, Math.max(0, arr.total - 0.15), 0);
+    const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
+    stopAllPreviewAudio();
+    const t0 = ctx.currentTime + 0.18;
+    const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf, { from });
+    tl.state = { t0, from, arr, mix };
+    tl.playing = true;
+    el.tlPlay.textContent = '■ 멈춤';
+    loopTl();
+  } finally {
+    previewBusy = false;
+  }
+}
+
+function loopTl() {
+  if (!tl.playing || !tl.state) return;
+  const ctx = audioCtx();
+  const t = tl.state.from + (ctx.currentTime - tl.state.t0);
+  if (t >= tl.state.arr.total - 0.01) { tlStop(true); return; }
+  if (t >= 0) {
+    tl.t = Math.max(0, t);
+    setPlayhead(tl.t);
+    el.playerTime.textContent = tl.t.toFixed(1);
+    el.progressBar.style.width = `${clamp((tl.t / tl.state.arr.total) * 100, 0, 100)}%`;
+    drawScene(el.previewCtx, sceneAt(tl.t, engine.activeEl));
+  }
+  tl.raf = requestAnimationFrame(loopTl);
+}
+
+function tlStop(silent) {
+  const was = tl.playing;
+  tl.playing = false;
+  cancelAnimationFrame(tl.raf);
+  if (tl.state) { try { tl.state.mix.stop(); } catch (e) {} }
+  tl.state = null;
+  if (el.tlPlay) el.tlPlay.textContent = '▶ 타임라인 듣기';
+  if (was && !silent) setPlayhead(tl.t);
+  if (was && silent) { el.progressBar.style.width = '0%'; tl.t = 0; setPlayhead(0); el.playerTime.textContent = '0.0'; }
+}
+
+// ── 타임라인 조작 (포인터 드래그 + 보조 슬라이더)
+function laneSec(clientX) {
+  const arr = S.arr;
+  const lane = el.tlVoiceLane;
+  if (!arr || !lane) return 0;
+  const r = lane.getBoundingClientRect();
+  return clamp(((clientX - r.left) / Math.max(1, r.width)) * arr.total, 0, arr.total);
+}
+
+function beginDrag(e, block) {
+  const arr = S.arr;
+  if (!arr) return;
+  if (tl.playing) tlStop();
+  const id = block.dataset.id;
+  tl.sel = id;
+  const kind = block.dataset.kind;
+  const handle = e.target.closest('.tlh');
+  const t = laneSec(e.clientX);
+  if (kind === 'voice') {
+    if (!clipList()) { materializeClips(); rebuild(); }
+    const clip = clipById(id);
+    if (!clip) return;
+    tl.drag = {
+      id, kind, mode: handle ? (handle.dataset.h === 'l' ? 'resize-l' : 'resize-r') : 'move',
+      x0: e.clientX, t0: t, at0: clip.at, len0: clip.len, block,
+    };
+  } else {
+    const bt = S.beatTrack;
+    const start = clampNum(bt.start, 0, arr.total, 0);
+    const len = clampNum(bt.len, 0, arr.total, 0) || Math.max(0.2, arr.total - start);
+    tl.drag = {
+      id: 'beat', kind: 'beat', mode: handle ? (handle.dataset.h === 'l' ? 'resize-l' : 'resize-r') : 'move',
+      x0: e.clientX, t0: t, at0: start, len0: len, block,
+    };
+  }
+  try { block.setPointerCapture(e.pointerId); } catch (err) {}
+  block.classList.add('drag');
+  el.tlVoiceLane.querySelectorAll('.tlclip.sel, .tlbeat.sel').forEach((n) => n.classList.remove('sel'));
+  el.tlBeatLane.querySelectorAll('.tlclip.sel, .tlbeat.sel').forEach((n) => n.classList.remove('sel'));
+  block.classList.add('sel');
+  showTlPanel();
+  e.preventDefault();
+}
+
+function moveDrag(e) {
+  const d = tl.drag;
+  const arr = S.arr;
+  if (!d || !arr) return;
+  const lane = el.tlVoiceLane;
+  const w = Math.max(1, lane.getBoundingClientRect().width);
+  const dt = ((e.clientX - d.x0) / w) * arr.total;
+  const snap = (v) => Math.round(v * 20) / 20;   // 0.05초 단위
+  const total = arr.total;
+  if (d.kind === 'voice') {
+    const clip = clipById(d.id);
+    if (!clip) return;
+    const seg = segById(clip.segId);
+    const maxLen = seg ? (seg.end - seg.start) / (S.mix.pitch || 1) : d.len0;
+    if (d.mode === 'move') {
+      clip.at = +clamp(snap(d.at0 + dt), 0, Math.max(0, total - 0.15)).toFixed(3);
+      d.block.style.left = `${(clip.at / total) * 100}%`;
+      const off = clampNum(S.voiceTrack && S.voiceTrack.offset, -2, 6, 0);
+      const dur = (S.arr && S.arr.voiceEvents.find((x) => x.id === d.id));
+      const span = dur ? dur.tEnd - dur.tStart : clip.len;
+      if (el.tlpTitle) el.tlpTitle.textContent = `🎙️ 조각 · ${(clip.at + off).toFixed(2)}–${(clip.at + off + span).toFixed(2)}초`;
+    } else if (d.mode === 'resize-r') {
+      clip.len = +clamp(snap(d.len0 + dt), 0.1, Math.max(0.1, maxLen)).toFixed(3);
+      d.block.style.width = `${((clip.len / (S.mix.pitch || 1)) / total) * 100}%`;
+    }
+    if (el.tlpAt) el.tlpAt.value = String(clip.at);
+    if (el.tlpAtOut) el.tlpAtOut.textContent = `${clip.at.toFixed(2)}초`;
+    if (el.tlpLen) el.tlpLen.value = String(Math.min(clip.len, +el.tlpLen.max));
+    if (el.tlpLenOut) el.tlpLenOut.textContent = `${Math.min(clip.len, +el.tlpLen.max).toFixed(2)}초`;
+  } else {
+    const bt = S.beatTrack;
+    if (d.mode === 'move') {
+      bt.start = +clamp(snap(d.at0 + dt), 0, Math.max(0, total - 0.2)).toFixed(3);
+      bt.len = +Number(d.len0).toFixed(3);
+      d.block.style.left = `${(bt.start / total) * 100}%`;
+    } else if (d.mode === 'resize-r') {
+      bt.len = +clamp(snap(d.len0 + dt), 0.2, Math.max(0.2, total - bt.start)).toFixed(3);
+      d.block.style.width = `${(bt.len / total) * 100}%`;
+    } else if (d.mode === 'resize-l') {
+      const start = clamp(snap(d.at0 + dt), 0, d.at0 + d.len0 - 0.2);
+      bt.start = +start.toFixed(3);
+      bt.len = +(d.len0 - (start - d.at0)).toFixed(3);
+      d.block.style.left = `${(bt.start / total) * 100}%`;
+      d.block.style.width = `${(bt.len / total) * 100}%`;
+    }
+    syncTlSliders();
+    if (el.tlInfo) el.tlInfo.textContent = `비트 ${bt.start.toFixed(2)}–${(bt.start + bt.len).toFixed(2)}초`;
+  }
+  e.preventDefault();
+}
+
+function endDrag() {
+  const d = tl.drag;
+  if (!d) return;
+  tl.drag = null;
+  try { d.block.classList.remove('drag'); } catch (e) {}
+  rebuild();
+  saveState();
+  renderTimeline();
+}
+
+function scrubTo(clientX) {
+  const t = laneSec(clientX);
+  tl.t = t;
+  staticT = t;
+  setPlayhead(t);
+  el.playerTime.textContent = t.toFixed(1);
+  engine.showStatic(t);
+  scheduleDraw();
+}
+
+function showTlPanel() {
+  if (!el.tlClipPanel) return;
+  el.tlClipPanel.hidden = false;
+  updateTlPanel();
+}
+
+function bindTimeline() {
+  const lanes = [el.tlVoiceLane, el.tlBeatLane].filter(Boolean);
+  lanes.forEach((lane) => {
+    lane.addEventListener('pointerdown', (e) => {
+      const block = e.target.closest('.tlclip, .tlbeat');
+      if (!block) { tl.sel = null; renderTimeline(); scrubTo(e.clientX); return; }
+      beginDrag(e, block);
+    });
+    lane.addEventListener('pointermove', (e) => { if (tl.drag) moveDrag(e); });
+    lane.addEventListener('pointerup', endDrag);
+    lane.addEventListener('pointercancel', endDrag);
+  });
+  if (el.tlRuler) {
+    el.tlRuler.addEventListener('pointerdown', (e) => {
+      if (tl.playing) tlStop();
+      scrubTo(e.clientX);
+      el.tlRuler.setPointerCapture(e.pointerId);
+    });
+    el.tlRuler.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') scrubTo(e.clientX); });
+  }
+  if (el.tlPlay) el.tlPlay.addEventListener('click', () => tlPlayToggle());
+  if (el.tlAuto) el.tlAuto.addEventListener('click', () => {
+    S.voiceClips = null;
+    tl.sel = null;
+    rebuild(); saveState(); renderTimeline();
+    toast('자동 배치로 돌아왔어요');
+  });
+
+  // 트랙 보조 슬라이더
+  const onRange = (node, out, apply, fmt) => {
+    if (!node) return;
+    node.addEventListener('input', () => {
+      apply(+node.value);
+      if (out) out.textContent = fmt(+node.value);
+      if (tl.playing) { tlStop(); tlPlayToggle(); }
+      rebuild();
+    });
+    node.addEventListener('change', saveState);
+  };
+  onRange(el.vtOffset, el.vtOffsetOut,
+    (v) => { S.voiceTrack = { ...(S.voiceTrack || {}), offset: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.vtVol, el.vtVolOut,
+    (v) => { S.voiceTrack = { ...(S.voiceTrack || {}), vol: v }; },
+    (v) => `${Math.round(v * 100)}%`);
+  onRange(el.btStart, el.btStartOut,
+    (v) => { S.beatTrack = { ...(S.beatTrack || {}), start: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.btLen, el.btLenOut,
+    (v) => { S.beatTrack = { ...(S.beatTrack || {}), len: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.btVol, el.btVolOut,
+    (v) => { S.beatTrack = { ...(S.beatTrack || {}), vol: v }; },
+    (v) => `${Math.round(v * 100)}%`);
+  onRange(el.btFadeIn, el.btFadeInOut,
+    (v) => { S.beatTrack = { ...(S.beatTrack || {}), fadeIn: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.btFadeOut, el.btFadeOutOut,
+    (v) => { S.beatTrack = { ...(S.beatTrack || {}), fadeOut: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.btDuck, el.btDuckOut,
+    (v) => { S.beatDuck = v; },
+    (v) => (v < 0.2 ? '끔' : `-${v.toFixed(1)}dB`));
+
+  // 선택한 조각 패널
+  if (el.tlpAt) {
+    el.tlpAt.addEventListener('input', () => {
+      if (tl.sel === 'beat' || !tl.sel) return;
+      const clip = clipById(tl.sel);
+      if (!clip) return;
+      clip.at = +el.tlpAt.value;
+      el.tlpAtOut.textContent = `${clip.at.toFixed(2)}초`;
+      if (tl.playing) tlStop();
+      rebuild();
+      scheduleDraw();
+    });
+    el.tlpAt.addEventListener('change', () => { saveState(); renderTimeline(); });
+    el.tlpLen.addEventListener('input', () => {
+      const clip = clipById(tl.sel);
+      if (!clip) return;
+      clip.len = +el.tlpLen.value;
+      el.tlpLenOut.textContent = `${clip.len.toFixed(2)}초`;
+      if (tl.playing) tlStop();
+      rebuild();
+    });
+    el.tlpLen.addEventListener('change', () => { saveState(); renderTimeline(); });
+    el.tlpVol.addEventListener('input', () => {
+      const clip = clipById(tl.sel);
+      if (!clip) return;
+      clip.vol = +el.tlpVol.value;
+      el.tlpVolOut.textContent = `${Math.round(clip.vol * 100)}%`;
+    });
+    el.tlpVol.addEventListener('change', () => {
+      saveState();
+      if (tl.playing) { tlStop(); tlPlayToggle(); }
+      rebuild(); renderTimeline();
+    });
+    el.tlpClose.addEventListener('click', () => { tl.sel = null; updateTlPanel(); renderTimeline(); });
+    el.tlpPlay.addEventListener('click', () => {
+      if (tl.sel === 'beat') {
+        tl.t = clampNum(S.beatTrack.start, 0, Math.max(0, (S.arr ? S.arr.total : 1) - 0.2), 0);
+        setPlayhead(tl.t);
+        tlPlayToggle();
+        return;
+      }
+      const ev = S.arr && S.arr.voiceEvents.find((x) => x.id === tl.sel);
+      if (ev) {
+        tl.t = ev.tStart;
+        setPlayhead(tl.t);
+        tlPlayToggle();
+      }
+    });
+    el.tlpOff.addEventListener('click', () => {
+      const clip = clipById(tl.sel);
+      if (!clip) return;
+      const seg = segById(clip.segId);
+      if (!seg) return;
+      stopSegAudio();
+      seg.on = false;
+      tl.sel = null;
+      if (clipList()) S.voiceClips = S.voiceClips.filter((c) => c.segId !== seg.id);
+      renderSegments();
+      drawWave(el.waveVoice, S.voice.peaks, { markers: S.voice.segments, color: 'rgba(255,255,255,.5)' });
+      rebuild(); saveState(); renderTimeline();
+      toast('이 구간을 리믹스에서 뺐어요');
+    });
+  }
 }
 
 // ──────────────────────────────────────────────────────
@@ -810,6 +1500,7 @@ function updateArrangeUI() {
   });
   renderSections();
   renderFmtChips();
+  renderTimeline();
 }
 
 function renderSections() {
@@ -949,6 +1640,8 @@ function saveState() {
       autoEdit: S.autoEdit, cutBeats: S.cutBeats, punch: S.punch, flash: S.flash, pulse: S.pulse, fitY: S.fitY,
       title1: S.title1, title2: S.title2, lenUnit: S.lenUnit,
       trim: S.trim, offsetBack: S.offsetBack,
+      voiceFx: S.voiceFx, voiceTrack: S.voiceTrack, voiceClips: S.voiceClips, beatTrack: S.beatTrack,
+      remixPattern: S.remixPattern, beatDuck: S.beatDuck, gridConf: S.gridConf,
     };
     localStorage.setItem(LS_STATE, JSON.stringify(data));
   } catch (e) {}
@@ -999,6 +1692,35 @@ function loadState() {
   if (S.beatMode === 'file' && !S.backing) S.beatMode = 'synth';
   if (d.trim) S.trim = d.trim;
   S.offsetBack = num(d.offsetBack, 0);
+  S.voiceFx = d.voiceFx === 'baby' ? 'baby' : 'all';
+  if (d.voiceTrack && typeof d.voiceTrack === 'object') {
+    S.voiceTrack = {
+      offset: clamp(num(d.voiceTrack.offset, 0), -2, 6),
+      vol: clamp(num(d.voiceTrack.vol, 1), 0, 1.5),
+    };
+  }
+  if (Array.isArray(d.voiceClips)) {
+    S.voiceClips = d.voiceClips.filter((c) => c && typeof c.segId === 'number').map((c, i) => ({
+      id: typeof c.id === 'string' ? c.id : 'c' + i,
+      segId: c.segId,
+      at: Math.max(0, num(c.at, 0)),
+      len: Math.max(0.04, num(c.len, 0.2)),
+      vol: clamp(num(c.vol, 1), 0, 1.5),
+    }));
+  } else S.voiceClips = null;
+  S.remixPattern = d.remixPattern !== false;
+  S.beatDuck = clamp(num(d.beatDuck, 5), 0, 10);
+  S.gridConf = clamp(num(d.gridConf, 0), 0, 1);
+  if (d.beatTrack && typeof d.beatTrack === 'object') {
+    S.beatTrack = {
+      start: Math.max(0, num(d.beatTrack.start, 0)),
+      len: Math.max(0, num(d.beatTrack.len, 0)),
+      vol: clamp(num(d.beatTrack.vol, 1), 0, 1.5),
+      fadeIn: clamp(num(d.beatTrack.fadeIn, 0), 0, 5),
+      fadeOut: clamp(num(d.beatTrack.fadeOut, 0), 0, 5),
+      srcOffset: Math.max(0, num(d.beatTrack.srcOffset, 0)),
+    };
+  }
 }
 
 // ──────────────────────────────────────────────────────
@@ -1029,6 +1751,9 @@ function renderRes() {
 // ① 고정 30fps(WebCodecs) 렌더 → ② 안 되면 실시간 MediaRecorder 녹화
 async function renderAll() {
   if (playing) stopPlayback();
+  tlStop(true);
+  stopSegAudio();
+  stopOneShotAudio();
   const arr = rebuild();
   if (!arr.total) return;
   if (!S.voice && !S.videoUrl && !(S.beatMode === 'file' && S.backing)) { toast('먼저 영상을 올려 주세요'); return; }
@@ -1516,6 +2241,20 @@ function applyHighlightStart() {
   toast('⚡ 인트로 없이 0.0초부터 바로 하이라이트로 시작해요');
 }
 
+function syncVoiceFx() {
+  if (!el.voiceFxChips) return;
+  el.voiceFxChips.querySelectorAll('button').forEach((b) => {
+    const on = (b.dataset.vfx || 'all') === S.voiceFx;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  if (el.voiceFxHint) {
+    el.voiceFxHint.innerHTML = S.voiceFx === 'baby'
+      ? '성인 <b>저음(350Hz 아래)</b>을 줄이고 <b>700Hz 웅웅대는 소리</b>를 깎아 아기 옹알이·웃음이 잘 들리게 해요. 미리듣기·저장 영상에 똑같이 적용됩니다.'
+      : '원본 목소리 그대로예요. 어른 목소리가 섞인 구간은 <b>▶</b>로 들어보고 <b>빠기</b>를 눌러 빼세요.';
+  }
+}
+
 function syncControls() {
   el.genreChips.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.genre === S.genre));
   el.bpm.value = String(S.bpm);
@@ -1542,6 +2281,8 @@ function syncControls() {
   el.lenUnit.dataset.unit = S.lenUnit;
   syncBeatMode();
   syncFormatInputs();
+  syncVoiceFx();
+  if (el.remixPattern) el.remixPattern.checked = S.remixPattern !== false;
 }
 
 function fitAutoTitles() {
@@ -1610,17 +2351,41 @@ function bind() {
   el.segList.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.play != null) playSegment(+b.dataset.play);
-    if (b.dataset.nudge) nudgeSeg(+b.dataset.i, +b.dataset.nudge);
+    if (b.dataset.play != null) { playSegment(+b.dataset.play); return; }
+    if (b.dataset.nudge) { nudgeSeg(+b.dataset.i, +b.dataset.nudge); return; }
+    if (b.dataset.use != null) {
+      const i = +b.dataset.use;
+      const s = S.voice && S.voice.segments[i];
+      if (!s) return;
+      s.on = !s.on;
+      if (!s.on) {
+        if (segAudio && segAudio.i === i) stopSegAudio();
+        if (clipList()) S.voiceClips = S.voiceClips.filter((c) => c.segId !== s.id);
+      }
+      renderSegments();
+      drawWave(el.waveVoice, S.voice.peaks, { markers: S.voice.segments, color: 'rgba(255,255,255,.5)' });
+      rebuild();
+      saveState();
+      toast(s.on ? `${i + 1}번 구간을 리믹스에 넣었어요` : `${i + 1}번 구간을 뺐어요`);
+    }
   });
-  el.segList.addEventListener('change', (e) => {
-    const i = +e.target.dataset.i;
-    if (!S.voice || !S.voice.segments[i]) return;
-    S.voice.segments[i].on = e.target.checked;
-    renderSegments();
-    drawWave(el.waveVoice, S.voice.peaks, { markers: S.voice.segments, color: 'rgba(255,255,255,.5)' });
-    rebuild();
-  });
+
+  // 목소리 음역 필터 (전체 / 👶 아기 고음 위주)
+  if (el.voiceFxChips) {
+    el.voiceFxChips.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const next = b.dataset.vfx === 'baby' ? 'baby' : 'all';
+      if (next === S.voiceFx) return;
+      S.voiceFx = next;
+      stopSegAudio();
+      if (tl.playing) { tlStop(); tlPlayToggle(); }
+      syncVoiceFx();
+      saveState();
+      toast(next === 'baby' ? '👶 아기 고음 위주로 들어요' : '전체 목소리로 들어요');
+    });
+  }
+  bindTimeline();
 
   // 비트 탭
   $$('#beatTabs button').forEach((b) => b.addEventListener('click', () => {
@@ -1642,6 +2407,7 @@ function bind() {
     }
     el.genreChips.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     if (S.fxMode === 'auto') applyAutoFx(true);
+    if (S.backing) scheduleGrid();
     rebuild();
     saveState();
   });
@@ -1653,7 +2419,7 @@ function bind() {
     fitAutoTitles();
     rebuild();
   });
-  el.bpm.addEventListener('change', saveState);
+  el.bpm.addEventListener('change', () => { saveState(); if (S.backing) applyGrid(true); });
 
   // 트림
   const applyTrim = (from, val) => {
@@ -1666,6 +2432,7 @@ function bind() {
     el.trimStart.value = String((S.trim.start / dur) * 1000);
     el.trimEnd.value = String((S.trim.end / dur) * 1000);
     drawBackWave();
+    scheduleGrid();
     rebuild();
   };
   el.trimStart.addEventListener('input', () => applyTrim('start', (+el.trimStart.value / 1000) * S.backing.duration));
@@ -1676,24 +2443,77 @@ function bind() {
     S.offsetBack = clamp(+el.offsetBack.value || 0, 0, 8);
     saveState(); rebuild();
   });
+  if (el.btnGridAuto) {
+    el.btnGridAuto.addEventListener('click', () => applyGrid(false));
+  }
+  if (el.remixPattern) {
+    el.remixPattern.checked = S.remixPattern !== false;
+    el.remixPattern.addEventListener('change', () => {
+      S.remixPattern = el.remixPattern.checked;
+      S.voiceClips = null;   // 패턴을 다시 만들거나, 끄면 기존 자동 배치로
+      rebuild(); saveState();
+      toast(S.remixPattern ? '박자 그리드 리믹스로 썰어 넣어요' : '박자 그리드 리믹스를 껐어요(기존 자동 배치)');
+    });
+  }
   el.btnBpmApply.addEventListener('click', () => {
     const b = +el.btnBpmApply.dataset.bpm;
     if (!b) return;
     S.bpm = b;
     el.bpm.value = String(b);
     el.bpmOut.textContent = String(b);
+    if (S.backing) applyGrid(true);
     rebuild(); saveState();
     toast(`BPM ${b}로 맞췄어요`);
   });
+  // 두 손잡이 트림 슬라이더 — 손가락으로 트랙 아무 곳이나 눌러 가까운 손잡이를 끌 수 있게(v1.5)
+  (function bindDualTrim() {
+    const box = document.querySelector('#pane-file .dualslider');
+    if (!box || !el.trimStart || !el.trimEnd) return;
+    let drag = null;
+    const syncNum = () => {
+      el.trimStartNum.value = S.trim.start.toFixed(1);
+      el.trimEndNum.value = S.trim.end.toFixed(1);
+      const dur = S.backing ? S.backing.duration : 1;
+      el.trimStart.value = String((S.trim.start / dur) * 1000);
+      el.trimEnd.value = String((S.trim.end / dur) * 1000);
+    };
+    const applyX = (clientX) => {
+      if (!S.backing) return;
+      const r = el.trimStart.getBoundingClientRect();
+      const ratio = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
+      const dur = S.backing.duration;
+      const t = ratio * dur;
+      if (!drag) drag = Math.abs(t - S.trim.start) <= Math.abs(t - S.trim.end) ? 'start' : 'end';
+      if (drag === 'start') S.trim.start = clamp(t, 0, Math.max(0, S.trim.end - 0.2));
+      else S.trim.end = clamp(t, S.trim.start + 0.2, dur);
+      syncNum();
+      drawBackWave();
+      scheduleGrid();
+      rebuild();
+    };
+    box.addEventListener('pointerdown', (e) => {
+      if (!S.backing) return;
+      drag = null;
+      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+      applyX(e.clientX);
+      e.preventDefault();
+    });
+    box.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      applyX(e.clientX);
+      e.preventDefault();
+    });
+    const end = () => { drag = null; saveState(); };
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', end);
+  })();
+
   el.btnTrimPlay.addEventListener('click', () => {
     if (!S.backing) return;
-    const ctx = audioCtx(); ctx.resume();
-    const src = ctx.createBufferSource();
-    src.buffer = S.backing.buffer;
-    const g = ctx.createGain(); g.gain.value = S.mix.beatVol;
-    src.connect(g); g.connect(ctx.destination);
-    src.start(0, S.trim.start, Math.min(S.backing.duration - S.trim.start, S.trim.end - S.trim.start));
-    toast('선택 구간을 재생해요');
+    stopAllPreviewAudio();
+    const dur = Math.min(S.backing.duration - S.trim.start, S.trim.end - S.trim.start);
+    playOneShot(S.backing.buffer, S.trim.start + (S.offsetBack || 0), dur, S.mix.beatVol * (S.backing.norm || 1));
+    toast('선택 구간을 재생해요 — 다시 누르면 새로 시작해요');
   });
 
   // 유튜브
@@ -1885,7 +2705,7 @@ function bind() {
     d.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
-  window.addEventListener('resize', () => { scheduleDraw(); if (S.voice) { drawWave(el.waveVoice, S.voice.peaks, { markers: S.voice.segments, color: 'rgba(255,255,255,.5)' }); drawBackWave(); } });
+  window.addEventListener('resize', () => { scheduleDraw(); setPlayhead(tl.t); if (S.voice) { drawWave(el.waveVoice, S.voice.peaks, { markers: S.voice.segments, color: 'rgba(255,255,255,.5)' }); drawBackWave(); } });
   window.addEventListener('beforeunload', (e) => { if (playing) { e.preventDefault(); e.returnValue = ''; } });
 }
 
@@ -1923,6 +2743,17 @@ function cacheEls() {
     btnRender: 'btnRender', renderBox: 'renderBox', renderBar: 'renderBar', renderMsg: 'renderMsg',
     resChips: 'resChips', resHint: 'resHint',
     outList: 'outList', saveHint: 'saveHint', thumb: 'thumb', btnHelp: 'btnHelp', toast: 'toast',
+    voiceFxChips: 'voiceFxChips', voiceFxHint: 'voiceFxHint',
+    tlBody: 'tlBody', tlRuler: 'tlRuler', tlVoiceLane: 'tlVoiceLane', tlBeatLane: 'tlBeatLane',
+    tlHeadLine: 'tlHeadLine', tlInfo: 'tlInfo', tlPlay: 'tlPlay', tlAuto: 'tlAuto', tlPos: 'tlPos',
+    tlClipPanel: 'tlClipPanel', tlpTitle: 'tlpTitle', tlpAt: 'tlpAt', tlpAtOut: 'tlpAtOut',
+    tlpLen: 'tlpLen', tlpLenOut: 'tlpLenOut', tlpVol: 'tlpVol', tlpVolOut: 'tlpVolOut',
+    tlpPlay: 'tlpPlay', tlpOff: 'tlpOff', tlpClose: 'tlpClose',
+    vtOffset: 'vtOffset', vtOffsetOut: 'vtOffsetOut', vtVol: 'vtVol', vtVolOut: 'vtVolOut',
+    btStart: 'btStart', btStartOut: 'btStartOut', btLen: 'btLen', btLenOut: 'btLenOut',
+    btVol: 'btVol', btVolOut: 'btVolOut', btFadeIn: 'btFadeIn', btFadeInOut: 'btFadeInOut',
+    btFadeOut: 'btFadeOut', btFadeOutOut: 'btFadeOutOut',
+    btDuck: 'btDuck', btDuckOut: 'btDuckOut', btnGridAuto: 'btnGridAuto', gridInfo: 'gridInfo', remixPattern: 'remixPattern',
   };
   for (const k in map) el[k] = document.getElementById(map[k]);
 }
@@ -1973,7 +2804,13 @@ async function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then(() => {}).catch(() => {});
   }
-  window.__remix = { S, engine, rebuild, get arr() { return S.arr; } };
+  window.__remix = {
+    S, engine, rebuild, get arr() { return S.arr; }, tl, playSegment, materializeClips,
+    renderWav, renderMixBuffer, scheduleMix, setPlayhead, syncVoiceFx,
+    get clipList() { return clipList(); },
+    get previewCount() { return previewPool.size + (segAudio ? 1 : 0) + (tl.playing ? 1 : 0) + (playing ? 1 : 0); },
+    stopAllPreviewAudio,
+  };
   document.documentElement.dataset.ready = '1';
 }
 

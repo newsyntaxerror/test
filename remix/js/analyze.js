@@ -720,6 +720,61 @@ export function detectVoice(buffer, opts = {}) {
   return keep;
 }
 
+// ── 가져온 음원의 첫 박(다운비트) 위치 자동 탐지 (v1.5) ──────────────
+// 선택 구간 [from, to] 안에서 BPM 그리드(박 간격)의 위상을 5ms 단위로 훑어,
+// 온셋(소리가 터지는 지점) 에너지가 가장 많이 겹치는 시작 오프셋을 찾는다.
+// 반환: { offset: 초(구간 시작 기준), confidence: 0~1, beats: 격자 수 }
+export function detectGridOffset(buffer, from, to, bpm) {
+  const sr = buffer.sampleRate;
+  const beat = 60 / (bpm || 128);
+  const a = Math.max(0, from || 0);
+  const b = Math.min(buffer.duration, to || buffer.duration);
+  if (!(b - a > beat * 1.5)) return { offset: 0, confidence: 0, beats: 0 };
+  const mono = mixToMono(buffer);
+  const hop = Math.max(64, Math.round(sr * 0.005));       // 5ms
+  const fps = sr / hop;
+  const i0 = Math.floor(a * sr);
+  const i1 = Math.min(mono.length, Math.floor(b * sr));
+  const frames = Math.max(0, Math.floor((i1 - i0 - hop) / hop));
+  if (frames < 20) return { offset: 0, confidence: 0, beats: 0 };
+  const env = new Float32Array(frames);
+  for (let f = 0; f < frames; f++) {
+    const off = i0 + f * hop;
+    let s = 0;
+    for (let i = 0; i < hop; i++) { const v = mono[off + i]; s += v * v; }
+    env[f] = Math.sqrt(s / hop);
+  }
+  // 온셋 강도 (앞 프레임 대비 증가분)
+  const on = new Float32Array(frames);
+  for (let f = 1; f < frames; f++) on[f] = Math.max(0, env[f] - env[f - 1]);
+  const beatF = beat * fps;
+  const nBeats = Math.floor(frames / beatF) - 1;
+  if (nBeats < 2) return { offset: 0, confidence: 0, beats: nBeats };
+  const win = Math.max(1, Math.round(0.025 * fps));      // ±25ms
+  const scoreAt = (idx) => {
+    let m = 0;
+    const s0 = Math.max(0, idx - win), s1 = Math.min(frames - 1, idx + win);
+    for (let i = s0; i <= s1; i++) if (on[i] > m) m = on[i];
+    return m;
+  };
+  let best = { offset: 0, score: -1 };
+  let sum = 0, cnt = 0;
+  const stepF = Math.max(1, Math.round(0.005 * fps));    // 5ms 간격
+  for (let o = 0; o < beatF; o += stepF) {
+    let sc = 0;
+    for (let k = 0; k < nBeats; k++) {
+      const idx = Math.round(o + k * beatF);
+      if (idx >= frames) break;
+      sc += scoreAt(idx);
+    }
+    if (sc > best.score) best = { offset: o / fps, score: sc };
+    sum += sc; cnt++;
+  }
+  const avg = cnt ? sum / cnt : 0;
+  const conf = best.score > 0 && avg > 0 ? Math.max(0, Math.min(1, (best.score / avg - 1) / 1.2)) : 0;
+  return { offset: +best.offset.toFixed(3), confidence: +conf.toFixed(2), beats: nBeats };
+}
+
 // 간이 BPM 추정 (온셋 자기상관 + 템포 사전확률)
 export function estimateBpm(buffer) {
   const sr = buffer.sampleRate;

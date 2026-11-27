@@ -1,14 +1,14 @@
 /* 옹알이 리믹스 — 오프라인 앱 셸 */
-const VERSION = 'remix-v1.4.1';
+const VERSION = 'remix-v1.5.0';
 const ASSETS = [
   './',
   './index.html',
-  './css/app.css?v=1.4.0',
-  './js/app.js?v=1.4.0',
-  './js/analyze.js?v=1.4.0',
-  './js/draw.js?v=1.4.0',
-  './js/encode.js?v=1.4.0',
-  './js/audio-mp4.js?v=1.4.0',
+  './css/app.css?v=1.5.0',
+  './js/app.js?v=1.5.0',
+  './js/analyze.js?v=1.5.0',
+  './js/draw.js?v=1.5.0',
+  './js/encode.js?v=1.5.0',
+  './js/audio-mp4.js?v=1.5.0',
   './js/mp4-muxer.js',
   './js/dsp.js',
   './js/arrange.js',
