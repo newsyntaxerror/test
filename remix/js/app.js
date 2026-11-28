@@ -2445,7 +2445,6 @@ function syncMixMode() {
     el.btnBpmSong.hidden = !(hasSong && S.songBpm && Math.abs(S.songBpm - S.bpm) > 0.5);
     el.btnBpmSong.dataset.bpm = S.songBpm ? String(S.songBpm) : '';
   }
-  el.songBlock && el.songBlock.classList.toggle('off', !hasSong);
 }
 
 // ⏩ 최종 배속 UI (v1.7)
