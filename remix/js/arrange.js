@@ -246,12 +246,17 @@ export function buildArrangement(S) {
   // ── 자동 비트싱크 영상 컷 ────────────────────────────
   const shots = [];
   const vDur = Math.max(0.2, S.videoDur || 0);
-  const fitMode = S.fitMode === 'beatcut' ? 'beatcut' : 'smooth';
-  if (fitMode === 'smooth') {
+  const fitMode = S.fitMode === 'beatcut' ? 'beatcut' : S.fitMode === 'smooth' ? 'smooth' : 'sync';
+  if (fitMode === 'sync') {
+    // v1.6 음원 싱크 믹싱(기본): 리믹스된 옹알이 오디오 타임라인 그대로 영상을 붙인다.
+    const syncShots = buildSyncShots(voiceEvents, sections, total, vDur, beat);
+    if (syncShots.length) shots.push(...syncShots);
+    else shots.push(...buildSmoothShots(sections, total, vDur));   // 목소리가 없으면 자연 재생
+  } else if (fitMode === 'smooth') {
     // 1배속 부드럽게: 원본 속도(1.0x) 그대로 이어 재생하고, 모자란 길이는 자연 루프로 채운다.
     shots.push(...buildSmoothShots(sections, total, vDur));
   } else if (!S.autoEdit) {
-    shots.push({ tStart: 0, tEnd: total, srcStart: 0, continuous: true });
+    shots.push({ tStart: 0, tEnd: total, srcStart: 0, rate: 1, continuous: true });
   } else {
     const pool = (S.voice && S.voice.segments ? S.voice.segments : [])
       .slice()
@@ -265,10 +270,10 @@ export function buildArrangement(S) {
     for (const sec of sections) {
       const isBreak = sec.kind === 'break';
       if (isBreak) {
-        // 브레이크다운은 컷 없이 자연스럽게 재생
+        // 브레이크다운은 컷 없이 자연스럽게 재생(정지 화면이 되지 않게 1배속으로 계속 흐른다)
         const dur = sec.dur;
         const start = pickSource(src, k++, vDur, dur);
-        shots.push({ tStart: sec.start, tEnd: sec.end, srcStart: start, continuous: true, slow: true });
+        shots.push({ tStart: sec.start, tEnd: sec.end, srcStart: start, rate: 1, continuous: true });
         continue;
       }
       let t = sec.start;
@@ -276,7 +281,7 @@ export function buildArrangement(S) {
       while (t < sec.end - 0.02 && guard++ < 300) {
         const dur = Math.min(cutSec, sec.end - t);
         const start = pickSource(src, k++, vDur, dur);
-        shots.push({ tStart: +t.toFixed(4), tEnd: +(t + dur).toFixed(4), srcStart: start });
+        shots.push({ tStart: +t.toFixed(4), tEnd: +(t + dur).toFixed(4), srcStart: start, rate: 1 });
         t += dur;
       }
     }
@@ -286,8 +291,91 @@ export function buildArrangement(S) {
     bpm, beat, bar, total, sections, voiceEvents, shots, fitMode, beatTrack,
     voiceTrack: { offset: vOffset, vol: vVol },
     beatPlan: sections.map((s) => ({ start: s.start, dur: s.dur, kind: s.kind, beatOn: !!s.beat })),
-    cutCount: shots.filter((s) => !s.continuous).length,
+    cutCount: fitMode === 'sync'
+      ? shots.filter((s) => s.sync || s.cut).length
+      : shots.filter((s) => !s.continuous).length,
   };
+}
+
+// ── v1.6 음원 싱크 믹싱 ──────────────────────────────────────
+// 음악에 섞인 옹알이(voiceEvents)는 이미 리믹스된 결과물이다. 조각마다
+// '원본 버퍼의 어느 시점(bufStart)을 몇 배속(rate)으로' 쓰는지가 정해져 있으므로,
+// 영상도 같은 시각에 같은 시점의 프레임을 보여주면 입모양·표정이 소리와 1:1로 맞는다.
+//   · 옹알이 이벤트 → srcStart = bufStart, rate = ev.rate 인 sync 샷
+//   · 이벤트 사이 틈 → 직전 화면에서 1배속으로 자연스럽게 이어 재생(멈추지 않음)
+//     긴 틈은 마디 경계에서 자연 재생 ↔ 하이라이트 컷을 번갈아 넣어 비트에 맞춰 움직인다.
+export function buildSyncShots(voiceEvents, sections, total, vDur, beatSec) {
+  const shots = [];
+  if (!(total > 0.05)) return shots;
+  const beat = beatSec > 0.02 ? beatSec : 60 / 140;
+  const bar = beat * 4;
+  const srcDur = vDur > 0.05 ? vDur : 0;
+  const wrapSrc = (x) => (srcDur > 0 ? ((x % srcDur) + srcDur) % srcDur : Math.max(0, x));
+
+  // 1) 시간순 정렬. 겹치면 뒤 이벤트가 이긴다(앞 이벤트의 화면 구간을 줄인다).
+  const sorted = (voiceEvents || [])
+    .filter((e) => e && isFinite(e.tStart) && isFinite(e.tEnd) && isFinite(e.bufStart) && e.tEnd - e.tStart > 0.02 && e.tStart < total - 0.02)
+    .slice()
+    .sort((a, b) => (a.tStart - b.tStart) || (a.tEnd - b.tEnd));
+  const list = [];
+  for (const e of sorted) {
+    const prev = list[list.length - 1];
+    if (prev && e.tStart - prev.tStart < 0.0005) { list[list.length - 1] = e; continue; }
+    if (prev && e.tStart < prev.tEnd) prev.tEnd = +Math.max(prev.tStart + 0.02, e.tStart).toFixed(4);
+    list.push({ ...e, rate: clampNum(e.rate, 0.25, 4, 1) });
+  }
+  if (!list.length) return shots;
+
+  const cover = (a, b, src, rate, extra) => {
+    const t0 = +Math.max(0, a).toFixed(4);
+    const t1 = +Math.min(total, b).toFixed(4);
+    if (!(t1 - t0 > 0.015)) return;
+    shots.push({ tStart: t0, tEnd: t1, srcStart: +Math.max(0, src).toFixed(3), rate, ...extra });
+  };
+
+  // 2) 인트로(첫 옹알이 전) — 영상 처음부터 1배속으로 천천히 흐른다
+  const first = list[0];
+  if (first.tStart > 0.02) cover(0, first.tStart, 0, 1, { continuous: true });
+
+  // 긴 틈에서 쓸 '표정 하이라이트' 원본 시점(옹알이 순간들) — 돌아가며 쓴다
+  let hiCursor = 0;
+  const highlightSrc = () => {
+    const e = list[hiCursor++ % list.length];
+    return wrapSrc(e.bufStart + Math.min(0.12, Math.max(0, (e.bufEnd - e.bufStart) * 0.25)));
+  };
+
+  const gapFill = (a, b, srcAtGapStart, between) => {
+    const len = b - a;
+    if (len <= 0.015) return;
+    // 짧은 틈(스터터 사이·옹알이 사이)은 직전 화면에서 그대로 이어 재생 — 입모양이 튀지 않는다
+    if (!between || len < 0.4) { cover(a, b, wrapSrc(srcAtGapStart), 1, { continuous: true }); return; }
+    // 긴 틈: 마디 경계마다 자연 재생 ↔ 하이라이트 컷을 번갈아, 화면이 멍때리지 않게
+    let t = a;
+    let natural = srcAtGapStart;
+    let k = 0;
+    while (t < b - 0.015 && k < 96) {
+      const nextBar = (Math.floor(t / bar + 1e-6) + 1) * bar;
+      let end = Math.min(b, Math.max(t + 0.12, nextBar));
+      if (b - end < 0.12) end = b;            // 자투리는 앞 토막에 붙인다
+      const useHi = (k % 2) === 1;
+      const src = useHi ? highlightSrc() : wrapSrc(natural);
+      cover(t, end, src, 1, useHi ? { continuous: true, cut: true } : { continuous: true });
+      natural += end - t;                     // 컷은 잠깐 비켜갔다가 자연 흐름으로 돌아온다
+      t = end;
+      k++;
+    }
+    if (t < b - 0.015) cover(t, b, wrapSrc(natural), 1, { continuous: true });
+  };
+
+  // 3) 옹알이 조각 → 다음 조각 사이
+  for (let i = 0; i < list.length; i++) {
+    const ev = list[i];
+    cover(ev.tStart, ev.tEnd, ev.bufStart, ev.rate, { sync: true, evId: ev.id, sec: ev.sectionKind });
+    const endSrc = ev.bufStart + (ev.tEnd - ev.tStart) * ev.rate;   // 이 조각이 끝난 원본 시점
+    const next = list[i + 1];
+    gapFill(ev.tEnd, next ? next.tStart : total, endSrc, !!next);
+  }
+  return shots;
 }
 
 // 1배속 연속 재생 샷 — 원본을 1.0x로 죽 이어 재생하고, 영상이 짧으면

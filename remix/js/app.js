@@ -1,11 +1,11 @@
 // 옹알이 리믹스 — 앱 로직
-import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.5.0';
-import { encodeMp4, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.5.0';
-import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks, detectGridOffset } from './analyze.js?v=1.5.0';
-import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js';
-import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js';
-import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js';
-import { tryYoutube } from './yt.js';
+import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.6.0';
+import { encodeMp4, sourceTimeAt, shotRate, shotMoves, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.6.0';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks, detectGridOffset } from './analyze.js?v=1.6.0';
+import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js?v=1.6.0';
+import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js?v=1.6.0';
+import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js?v=1.6.0';
+import { tryYoutube } from './yt.js?v=1.6.0';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -37,7 +37,7 @@ const S = {
   fmtId: 'ver1',
   fmt: cloneFormat(BUILTINS[0]),
   userFormats: [],
-  fitMode: 'smooth',    // smooth = 1배속 부드럽게(기본) · beatcut = 비트 점프컷
+  fitMode: 'sync',      // sync = 음원 싱크 믹싱(기본) · smooth = 1배속 부드럽게 · beatcut = 비트 점프컷
   renderRes: null,      // '720' | '1080' — 모바일 기본은 720p
   fxMode: 'auto',       // auto = 알아서 편집 · manual = 직접 편집
   fx: { shake: 1, color: 'vivid', edge: true, psy: 2 },   // psy = 🪩 싸이키 조명 (0 끔 · 1 약 · 2 강)
@@ -59,6 +59,7 @@ let beatCache = { key: '', buf: null, rate: 0 };
 let playing = false;
 let playState = null;
 let rafId = 0;
+let lastDrawT = 0;        // 미리보기 캔버스에 마지막으로 그린 타임라인 시각(진단용)
 let staticT = 0.6;
 let drawTimer = 0;
 let segAudio = null;      // 구간 미리듣기(한 번에 하나만)
@@ -92,7 +93,9 @@ class CutEngine {
 
   ensureEls() {
     if (this.els.length) return;
-    for (let i = 0; i < 3; i++) {
+    // v1.6: 음원 싱크 모드는 0.2초 스터터까지 이어져, 다음 샷을 더 미리 seek해 둘 요소가 필요하다.
+    //      (한 번에 하나만 재생하므로 일시정지된 요소를 여러 개 두는 것은 부담이 적다)
+    for (let i = 0; i < 5; i++) {
       const v = document.createElement('video');
       v.muted = true;
       v.defaultMuted = true;
@@ -170,7 +173,9 @@ class CutEngine {
     const v = this.spare();
     if (!v) return;
     this.prepared.set(idx, v);
-    await this.seekTo(v, this.shots[idx].srcStart);
+    const shot = this.shots[idx];
+    this.applyRate(v, shot);
+    await this.seekTo(v, shot.srcStart);
     if (gen !== this.generation) return;
     if (this.prepared.get(idx) === v && v !== this.activeEl) {
       try { v.pause(); } catch (e) {}
@@ -182,66 +187,86 @@ class CutEngine {
     if (idx < 0) return;
     if (idx === this.activeIdx) return;
     const shot = this.shots[idx];
+    const exp = this.shotSourceTime(shot, t);
+    // 음원 싱크 샷은 짧은 스터터도 많아, 들어오는 순간의 정확한 원본 시점으로 맞춘다.
+    const tol = shot.sync ? 0.05 : 0.12;
     let v = this.prepared.get(idx);
+    this.activeIdx = idx;                      // await 사이 재진입 방지
     if (v) {
       this.prepared.delete(idx);
       if (this.activeEl && this.activeEl !== v) { try { this.activeEl.pause(); } catch (e) {} }
       this.activeEl = v;
-      this.activeIdx = idx;
-      try { await v.play(); } catch (e) {}
-      this.syncRate();
     } else {
       // 준비된 엘리먼트가 없으면 현재 엘리먼트로 폴백(잠깐 멈췄다 이어짐)
       const f = this.activeEl || this.els[0];
-      if (f) {
-        this.activeIdx = idx;
-        this.activeEl = f;
-        await this.seekTo(f, shot.srcStart);
-        try { await f.play(); } catch (e) {}
-      }
+      if (!f) return;
+      this.activeEl = f;
     }
-    this.prime(idx + 1);
-    this.prime(idx + 2);
+    const elv = this.activeEl;
+    await this.seekTo(elv, exp, tol);
+    this.applyRate(elv, shot);
+    try { const p = elv.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+    this.applyRate(elv, shot);                 // 사파리는 play 전 설정을 무시할 때가 있다
+    this.resetAnchor(t, elv.currentTime);
+    // 짧은 스터터가 이어져도 다음 샷들이 미리 seek되어 있도록 3개까지 준비한다.
+    const ahead = (shot.sync || this.shots[idx + 1] && this.shots[idx + 1].sync) ? 3 : 2;
+    for (let k = 1; k <= ahead; k++) this.prime(idx + k);
+  }
+
+  // 샷 배속(rate)을 video 엘리먼트에 적용
+  applyRate(v, shot) {
+    if (!v) return;
+    const r = shotRate(shot);
+    try { if (v.defaultPlaybackRate !== r) v.defaultPlaybackRate = r; } catch (e) {}
+    try { if (Math.abs((v.playbackRate || 1) - r) > 0.001) v.playbackRate = r; } catch (e) {}
+  }
+
+  resetAnchor(t, src) {
+    this.anchorIdx = this.activeIdx;
+    this.anchorT = t;
+    this.anchorSrc = src;
   }
 
   syncRate() {
-    if (!this.activeEl) return;
-    try { this.activeEl.playbackRate = 1; } catch (e) {}
+    const shot = this.shots[this.activeIdx];
+    if (!this.activeEl || !shot) return;
+    this.applyRate(this.activeEl, shot);
   }
 
-  // 샷의 특정 시각에 보여야 하는 원본 영상 위치(루프 반영)
+  // 샷의 특정 시각에 보여야 하는 원본 영상 위치(배속·루프 반영)
   shotSourceTime(shot, t) {
     if (!shot) return 0;
     const vDur = S.videoDur || 0;
-    if (shot.smooth && vDur > 0.05) {
-      const x = shot.srcStart + Math.max(0, t - shot.tStart);
-      return ((x % vDur) + vDur) % vDur;
+    if (shotMoves(shot)) {
+      const x = shot.srcStart + Math.max(0, t - shot.tStart) * shotRate(shot);
+      if (vDur > 0.05) return ((x % vDur) + vDur) % vDur;
+      return Math.max(0, x);
     }
-    return shot.srcStart;
+    return Math.max(0, shot.srcStart);
   }
 
-  // 1배속 연속 재생 구간은 매 프레임 currentTime을 강제로 다시 걸지 않는다.
-  // 샷이 시작된 실제 위치를 기준(anchor)으로, 0.25초 넘게 어긋났을 때만 살짝 보정한다.
+  // 현재 샷의 예상 원본 시점과 실제 video 시점의 차이만 보정한다.
+  // (오디오 컨텍스트 시각 t가 기준 — 미리보기와 저장된 MP4가 같은 프레임을 보게 된다)
   follow(t) {
     const v = this.activeEl;
     if (!v) return;
     const shot = this.shots[this.activeIdx];
     if (!shot) return;
-    try { if (v.playbackRate !== 1) v.playbackRate = 1; } catch (e) {}
+    this.applyRate(v, shot);
     if (v.paused) { try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-    if (this.anchorIdx !== this.activeIdx) {
-      this.anchorIdx = this.activeIdx;
-      this.anchorT = t;
-      this.anchorSrc = v.currentTime;
-      return;   // 방금 시작된 샷 — 자리 잡을 시간을 준다
-    }
+    if (this.anchorIdx !== this.activeIdx) { this.resetAnchor(t, v.currentTime); return; }
     const vDur = S.videoDur || 0;
-    let exp = this.anchorSrc + (t - this.anchorT);
-    if (shot.smooth && vDur > 0.05) exp = ((exp % vDur) + vDur) % vDur;
-    const drift = Math.abs(v.currentTime - exp);
-    const wrap = shot.smooth && vDur > 0.05 ? Math.min(drift, vDur - drift) : drift;
-    if (wrap > 0.25) {
-      try { v.currentTime = exp; this.anchorT = t; this.anchorSrc = exp; } catch (e) {}
+    const exp = this.shotSourceTime(shot, t);
+    let drift = Math.abs(v.currentTime - exp);
+    if (vDur > 0.05) drift = Math.min(drift, Math.abs(vDur - drift));   // 루프 경계는 가깝다
+    const remain = shot.tEnd - t;
+    // 짧은 싱크 샷은 보정 seek를 하지 않는다 — seek가 재생을 멈춰 오히려 프레임이 밀리고,
+    // 어차피 다음 컷에서 정확한 시점으로 다시 붙는다. 긴 샷만 0.16초 넘게 어긋나면 당긴다.
+    const tol = shot.sync ? 0.16 : 0.22;
+    const now = performance.now();
+    if (remain > (shot.sync ? 0.16 : 0.08) && drift > tol && now - (this._lastSeek || 0) > 220) {
+      this._lastSeek = now;
+      try { v.currentTime = exp; } catch (e) {}
     }
   }
 
@@ -261,7 +286,10 @@ class CutEngine {
         if (this.activeEl && this.activeEl !== v) { try { this.activeEl.pause(); } catch (e) {} }
         this.activeEl = v;
         this.activeIdx = idx;
-        await this.seekTo(v, this.shotSourceTime(this.shots[idx], t), 0.18);
+        const shot = this.shots[idx];
+        await this.seekTo(v, this.shotSourceTime(shot, t), shot.sync ? 0.02 : 0.18);
+        this.applyRate(v, shot);
+        this.resetAnchor(t, v.currentTime);
       }
       this.prime(idx + 1);
       this.prime(idx + 2);
@@ -288,7 +316,8 @@ class CutEngine {
     if (!this.activeEl) { drawPreview(t); return; }
     if (this.activeIdx !== idx) {
       this.activeIdx = idx;
-      await this.seekTo(this.activeEl, this.shotSourceTime(shot, t), shot.smooth ? 0.18 : 0.03);
+      await this.seekTo(this.activeEl, this.shotSourceTime(shot, t), shot.sync ? 0.02 : shot.smooth ? 0.18 : 0.03);
+      this.applyRate(this.activeEl, shot);
     }
     this.prime(idx + 1);
     this.draw();
@@ -599,12 +628,14 @@ async function play() {
     stopAllPreviewAudio();
     const t0 = ctx.currentTime + 0.35;
     const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf);
-    playState = { t0, mix, arr, start: performance.now() };
+    playState = { t0, mix, arr, start: performance.now(), started: false };
     playing = true;
     el.btnPlay.textContent = '■ 정지';
     el.btnStop.hidden = false;
     el.playDot.classList.add('on');
-    await engine.startAt(0);
+    // 프리롤(t<0) 동안에는 영상을 틀지 않는다 — 음악이 시작되는 t=0에 맞춰 출발해야
+    // 미리보기 영상이 소리보다 먼저 흘러가지 않는다(v1.6).
+    await engine.startAt(0, false);
     loop();
   } finally {
     previewBusy = false;
@@ -618,9 +649,16 @@ function loop() {
   const arr = playState.arr;
   if (t >= arr.total + 0.02) { stopPlayback(); return; }
   const show = Math.max(0, t);
-  engine.sync(show);
-  engine.follow(show);
+  if (t >= 0 && playState && !playState.started) {   // 음악과 동시에 영상 출발
+    playState.started = true;
+    engine.playNow();
+  }
+  if (t >= -0.001) {
+    engine.sync(show);
+    engine.follow(show);
+  }
   const sc = sceneAt(show, engine.activeEl);
+  lastDrawT = show;
   drawScene(el.previewCtx, sc);
   el.playerTime.textContent = show.toFixed(1);
   el.progressBar.style.width = `${clamp((show / arr.total) * 100, 0, 100)}%`;
@@ -1638,7 +1676,7 @@ function saveState() {
       beatMode: S.beatMode, genre: S.genre, bpm: S.bpm,
       sections: S.sections, mix: S.mix,
       fmtId: S.fmtId, fmt: S.fmt,
-      fitMode: S.fitMode, renderRes: S.renderRes,
+      fitMode: S.fitMode, renderRes: S.renderRes, stateVer: 2,
       fxMode: S.fxMode, fx: S.fx,
       autoEdit: S.autoEdit, cutBeats: S.cutBeats, punch: S.punch, flash: S.flash, pulse: S.pulse, fitY: S.fitY,
       title1: S.title1, title2: S.title2, lenUnit: S.lenUnit,
@@ -1673,7 +1711,11 @@ function loadState() {
     if (f) { S.fmtId = f.id; S.fmt = cloneFormat(f); }
   }
   S.autoEdit = d.autoEdit !== false;
-  S.fitMode = d.fitMode === 'beatcut' ? 'beatcut' : 'smooth';   // 기본: 1배속 부드럽게
+  // v1.6: 기본을 '음원 싱크 믹싱'으로 바꿨다. 예전 저장값의 기본(smooth)은 sync로 옮기고,
+  //       비트컷을 직접 고른 경우만 그대로 둔다.
+  S.fitMode = d.fitMode === 'beatcut' ? 'beatcut'
+    : d.fitMode === 'sync' ? 'sync'
+      : (d.stateVer === 2 ? 'smooth' : 'sync');
   S.renderRes = d.renderRes === '1080' ? '1080' : d.renderRes === '720' ? '720' : null;
   S.fxMode = d.fxMode === 'manual' ? 'manual' : 'auto';
   if (d.fx && typeof d.fx === 'object') {
@@ -2104,26 +2146,28 @@ function syncBeatMode() {
   el.paneYt.hidden = S.beatMode !== 'yt';
 }
 
-// 영상 맞춤 방식(1배속 부드럽게 / 비트컷) UI
+// 영상 맞춤 방식(음원 싱크 믹싱 / 1배속 부드럽게 / 비트컷) UI
 function syncFitMode() {
-  const smooth = S.fitMode !== 'beatcut';
   if (el.fitModes) {
     el.fitModes.querySelectorAll('button').forEach((b) => {
-      const on = (b.dataset.mode === 'beatcut') !== smooth;
+      const on = b.dataset.mode === S.fitMode;
       b.classList.toggle('on', on);
-      b.classList.toggle('primary', on && b.dataset.mode === 'smooth');
-      b.classList.toggle('ghost', !(on && b.dataset.mode === 'smooth'));
+      b.classList.toggle('primary', on);
+      b.classList.toggle('ghost', !on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   }
   if (el.fitHint) {
-    el.fitHint.innerHTML = smooth
-      ? '원본 영상을 <b>1배속</b> 그대로 이어 재생해요. 영상이 짧으면 끝에서 자연스럽게 다시 이어 붙여(루프) 음원 길이에 딱 맞추고, 드롭에서는 영상 처음부터 다시 시작해 비트와 맞춰요. 슬로우모션이 생기지 않아요.'
-      : '목소리 구간을 박자마다 점프컷해요(기존 방식). 영상이 짧으면 반복 컷으로 채우고, 1배속보다 화면 전환이 잦아요.';
+    el.fitHint.innerHTML = S.fitMode === 'sync'
+      ? '<b>🎯 음원 싱크 믹싱</b> — 음악에 섞인 옹알이 조각이 나올 때마다 영상도 <b>그 소리의 원본 순간(입모양·표정)</b>으로 정확히 점프·반복해요. 소리가 없는 비트 구간은 화면이 멈추지 않고 비트에 맞춰 이어지고, 저장한 MP4도 미리보기와 똑같이 움직여요.'
+      : S.fitMode === 'smooth'
+        ? '원본 영상을 <b>1배속</b> 그대로 이어 재생해요. 영상이 짧으면 끝에서 자연스럽게 다시 이어 붙여(루프) 음원 길이에 딱 맞추고, 드롭에서는 영상 처음부터 다시 시작해 비트와 맞춰요. 슬로우모션이 생기지 않아요.'
+        : '목소리 구간을 박자마다 점프컷해요(기존 방식). 영상이 짧으면 반복 컷으로 채우고, 1배속보다 화면 전환이 잦아요.';
   }
-  // 1배속 모드에서는 컷 설정이 필요 없어 숨김
-  if (el.autoEdit) el.autoEdit.closest('.switchrow').hidden = smooth;
-  if (el.cutBeats) el.cutBeats.closest('.selrow').hidden = smooth;
+  // 싱크·1배속 모드에서는 컷 설정이 필요 없어 숨김
+  const noCuts = S.fitMode !== 'beatcut';
+  if (el.autoEdit) el.autoEdit.closest('.switchrow').hidden = noCuts;
+  if (el.cutBeats) el.cutBeats.closest('.selrow').hidden = noCuts;
   if (el.editOpts) el.editOpts.classList.toggle('off', false);
 }
 
@@ -2602,9 +2646,11 @@ function bind() {
     el.fitModes.addEventListener('click', (e) => {
       const b = e.target.closest('button');
       if (!b || !b.dataset.mode) return;
-      S.fitMode = b.dataset.mode === 'beatcut' ? 'beatcut' : 'smooth';
+      const mode = b.dataset.mode === 'beatcut' ? 'beatcut' : b.dataset.mode === 'smooth' ? 'smooth' : 'sync';
+      S.fitMode = mode;
       syncFitMode(); rebuild(); saveState();
-      toast(S.fitMode === 'smooth' ? '🎬 1배속 부드럽게로 맞췄어요' : '✂️ 비트컷으로 바꿨어요');
+      toast(mode === 'sync' ? '🎯 음원 싱크 믹싱 — 옹알이 입모양에 맞춰 영상도 같이 움직여요'
+        : mode === 'smooth' ? '🎬 1배속 부드럽게로 맞췄어요' : '✂️ 비트컷으로 바꿨어요');
     });
   }
 
@@ -2810,7 +2856,10 @@ async function init() {
   }
   window.__remix = {
     S, engine, rebuild, get arr() { return S.arr; }, tl, playSegment, materializeClips,
-    renderWav, renderMixBuffer, scheduleMix, setPlayhead, syncVoiceFx,
+    renderWav, renderMixBuffer, scheduleMix, setPlayhead, syncVoiceFx, syncFitMode,
+    sourceTimeAt, shotSourceAt: (t) => engine.shotSourceTime(engine.shots[engine.indexAt(t)], t),
+    get nowT() { return playState ? audioCtx().currentTime - playState.t0 : NaN; },
+    get lastDrawT() { return lastDrawT; },
     get clipList() { return clipList(); },
     get previewCount() { return previewPool.size + (segAudio ? 1 : 0) + (tl.playing ? 1 : 0) + (playing ? 1 : 0); },
     stopAllPreviewAudio,

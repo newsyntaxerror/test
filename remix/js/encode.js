@@ -6,14 +6,14 @@
 //   A) AudioEncoder가 있으면(v1.3과 동일) AAC/Opus로 직접 인코딩.
 //   B) iOS 17/18 Safari처럼 AudioEncoder가 없으면(v1.4 하이브리드) 완성된 믹스를
 //      MediaRecorder로 '소리만' 녹음해 그 MP4에서 AAC 프레임을 꺼내 비디오와 합친다.
-import { Muxer, ArrayBufferTarget } from './mp4-muxer.js';
+import { Muxer, ArrayBufferTarget } from './mp4-muxer.js?v=1.6.0';
 import {
   audioRecorderSupported,
   pickAudioRecorderMime,
   recordAudioMp4,
   measureAudioStart,
   demuxAudioMp4,
-} from './audio-mp4.js';
+} from './audio-mp4.js?v=1.6.0';
 
 export const FPS = 30;
 
@@ -152,7 +152,22 @@ export class FrameGrabber {
   }
 }
 
-// 타임라인 t초에 보여야 하는 원본 시점 (샷 목록 + 루프 반영)
+// 샷이 흘러가는 속도(배속). 값이 없으면 1배속.
+export function shotRate(shot) {
+  const r = shot && shot.rate;
+  return (typeof r === 'number' && isFinite(r) && r > 0.05) ? r : 1;
+}
+
+// 샷이 '시간이 흐르는' 샷인지 — sync(음원 싱크) · continuous · smooth,
+// 또는 rate가 지정된 샷(비트컷도 정지 화면이 아니라 1배속으로 흐른다)은 모두 흐른다.
+export function shotMoves(shot) {
+  if (!shot) return false;
+  return !!(shot.sync || shot.continuous || shot.smooth || (typeof shot.rate === 'number' && isFinite(shot.rate)));
+}
+
+// 타임라인 t초에 보여야 하는 원본 시점 (샷 목록 + 배속 + 루프 반영)
+// v1.6: 음원 싱크 샷은 원본의 bufStart에서 시작해 오디오와 같은 배속으로 흐른다.
+//       → t초에 들리는 옹알이와 화면 속 입모양이 정확히 같은 원본 시점이 된다.
 export function sourceTimeAt(shots, videoDur, t) {
   if (!shots || !shots.length || !(videoDur > 0.05)) return 0;
   let shot = shots[shots.length - 1];
@@ -160,9 +175,9 @@ export function sourceTimeAt(shots, videoDur, t) {
     if (t < shots[i].tEnd) { shot = shots[i]; break; }
   }
   if (!shot) return 0;
-  if (shot.smooth) {
-    const x = shot.srcStart + Math.max(0, t - shot.tStart);
-    return ((x % videoDur) + videoDur) % videoDur;
+  if (shotMoves(shot)) {
+    const x = shot.srcStart + Math.max(0, t - shot.tStart) * shotRate(shot);
+    return ((x % videoDur) + videoDur) % videoDur;      // 영상보다 길면 처음으로 자연 루프
   }
   return Math.max(0, Math.min(videoDur - 0.01, shot.srcStart));
 }

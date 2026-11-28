@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css?v=1.5.0">
+<link rel="stylesheet" href="css/app.css?v=1.6.0">
 </head>
 <body>
 <div class="app">
@@ -195,10 +195,11 @@
 
     <!-- 4. 자동 편집 -->
     <section class="card" id="cardEdit">
-      <h2><b>4</b> 영상 자동 편집 <small>1배속 · 비트 컷</small></h2>
-      <div class="fitmodes" id="fitModes" role="group" aria-label="영상 맞춤 방식">
-        <button data-mode="smooth" class="primary sm on">🎬 1배속 부드럽게 맞추기</button>
-        <button data-mode="beatcut" class="ghost sm">✂️ 비트컷</button>
+      <h2><b>4</b> 영상 자동 편집 <small>음원 싱크 · 1배속 · 비트 컷</small></h2>
+      <div class="fitmodes triple" id="fitModes" role="group" aria-label="영상 맞춤 방식">
+        <button data-mode="sync" class="primary sm on">🎯 음원 싱크 믹싱</button>
+        <button data-mode="smooth" class="ghost sm">🎬 1배속 부드럽게</button>
+        <button data-mode="beatcut" class="ghost sm">✂️ 비트 컷</button>
       </div>
       <p class="hint" id="fitHint"></p>
       <label class="switchrow">
@@ -413,10 +414,10 @@
 
   <footer class="foot">
     <span>옹알이 리믹스</span>
-    <span id="verLabel">v1.5</span>
+    <span id="verLabel">v1.6</span>
   </footer>
 </div>
 <div id="toast" class="toast" hidden></div>
-<script type="module" src="js/app.js?v=1.5.0"></script>
+<script type="module" src="js/app.js?v=1.6.0"></script>
 </body>
 </html>
