@@ -281,6 +281,18 @@ export function buildBeat(ctx, spec) {
     }
     riser(start + Math.max(0, (bars - 1) * bar - bar * 0.25), bar * 1.25, 0.75);
     hat(start + (bars - 1) * bar + 14 * step, 0.25, true);
+    // v1.7 빌드업 채우기 — 브레이크 마지막 마디에서 드롭으로 넘어가며 박자를 점점 촘촘히 쪼갠다.
+    //  (배경노래 위에 얹을 때도 드롭 진입이 또렷하게 들린다)
+    const lastBarT = start + (bars - 1) * bar;
+    if (genre === 'trap') {
+      for (let s = 8; s < 16; s++) hat(lastBarT + s * step, 0.16 + 0.14 * ((s - 8) / 7));
+      for (let s = 12; s < 16; s++) snare(lastBarT + s * step, 0.22 + 0.1 * ((s - 12) / 3), 230);
+    } else if (genre === 'lofi') {
+      for (let s = 8; s < 16; s += 2) hat(lastBarT + s * step, 0.12);
+    } else {
+      for (let s = 0; s < 4; s++) snare(lastBarT + s * step * 2, 0.14 + 0.1 * (s / 3), 215);
+      for (let s = 12; s < 16; s++) snare(lastBarT + s * step, 0.32, 225);
+    }
   }
 
   function outro(start, bars) {

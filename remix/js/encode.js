@@ -6,14 +6,14 @@
 //   A) AudioEncoder가 있으면(v1.3과 동일) AAC/Opus로 직접 인코딩.
 //   B) iOS 17/18 Safari처럼 AudioEncoder가 없으면(v1.4 하이브리드) 완성된 믹스를
 //      MediaRecorder로 '소리만' 녹음해 그 MP4에서 AAC 프레임을 꺼내 비디오와 합친다.
-import { Muxer, ArrayBufferTarget } from './mp4-muxer.js?v=1.6.0';
+import { Muxer, ArrayBufferTarget } from './mp4-muxer.js?v=1.7.0';
 import {
   audioRecorderSupported,
   pickAudioRecorderMime,
   recordAudioMp4,
   measureAudioStart,
   demuxAudioMp4,
-} from './audio-mp4.js?v=1.6.0';
+} from './audio-mp4.js?v=1.7.0';
 
 export const FPS = 30;
 
@@ -373,7 +373,9 @@ export async function encodeMp4(o) {
     for (let i = 0; i < frames; i++) {
       if (vError) break;
       const t = Math.min(total, i / FPS);
-      if (videoUrl) await grabber.seekTo(sourceTimeAt(shots, videoDur, t));
+      // v1.7: 프레임 경계(1/30초)를 그대로 seek하면 디코더가 직전 프레임을 올리는 경우가 있다
+      //       → 반 프레임(1/60초) 앞을 목표로 잡아 '그 순간에 가장 가까운 프레임'을 그린다.
+      if (videoUrl) await grabber.seekTo(sourceTimeAt(shots, videoDur, t) + 0.5 / FPS);
       draw(t, grabber.el);
       const ts = Math.round((i * 1e6) / FPS);
       const frame = new VideoFrame(canvas, { timestamp: ts, duration: Math.round(1e6 / FPS) });

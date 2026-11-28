@@ -1,11 +1,11 @@
 // 옹알이 리믹스 — 앱 로직
-import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.6.0';
-import { encodeMp4, sourceTimeAt, shotRate, shotMoves, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.6.0';
-import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks, detectGridOffset } from './analyze.js?v=1.6.0';
-import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js?v=1.6.0';
-import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js?v=1.6.0';
-import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js?v=1.6.0';
-import { tryYoutube } from './yt.js?v=1.6.0';
+import { loadAssets, drawScene, drawWave, setCustomLogo, canvasToBlob, W, H } from './draw.js?v=1.7.0';
+import { encodeMp4, sourceTimeAt, shotRate, shotMoves, webCodecsSupported, webCodecsVideoSupported, webCodecsAudioSupported, hybridAudioSupported } from './encode.js?v=1.7.0';
+import { decodeMedia, decodeMediaFile, detectVoice, estimateBpm, waveformPeaks, detectGridOffset } from './analyze.js?v=1.7.0';
+import { buildBeat, makeIR, encodeWav, GENRES } from './dsp.js?v=1.7.0';
+import { buildArrangement, defaultSections, fitToSeconds, totalBeats, newSection, labelFor, SECTION_KINDS } from './arrange.js?v=1.7.0';
+import { BUILTINS, loadUserFormats, saveUserFormats, cloneFormat } from './formats.js?v=1.7.0';
+import { tryYoutube } from './yt.js?v=1.7.0';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -18,12 +18,16 @@ const S = {
   voice: null,          // {name, buffer, peaks, segments, duration}
   videoUrl: null,
   videoDur: 0,
-  beatMode: 'synth',
   genre: 'techno',
   bpm: 140,
-  backing: null,        // {name, buffer, peaks, duration}
+  beatOn: true,         // 🥁 장르 비트 사용(v1.7) — 배경노래와 함께도 켜 둘 수 있다
+  songOn: true,         // 🎵 배경노래 사용
+  backing: null,        // 🎵 배경노래 {name, buffer, peaks, duration, norm, kind}
+  songBpm: 0,           // 배경노래에서 추정한 BPM
+  songTrack: { start: 0, len: 0, vol: 1, fadeIn: 0, fadeOut: 0, srcOffset: 0 },   // 🎵 배경노래 트랙
   trim: { start: 0, end: 0 },
   offsetBack: 0,
+  outputSpeed: 1,       // ⏩ 최종 배속(0.5~2.0) — 영상·소리 전부 같은 배율로
   sections: defaultSections(),
   mix: { voiceVol: 1, beatVol: 0.8, reverb: 0.18, pitch: 1 },
   voiceFx: 'all',       // all = 전체 목소리 · baby = 👶 아기 고음 위주(성인 저음 감쇄)
@@ -89,6 +93,7 @@ class CutEngine {
     this.anchorIdx = -1;
     this.anchorT = 0;
     this.anchorSrc = 0;
+    this.speed = 1;          // v1.7 최종 배속 — 타임라인 초가 실시간보다 speed배 빨리 흘러가므로 영상도 같이 빠르게
   }
 
   ensureEls() {
@@ -213,10 +218,11 @@ class CutEngine {
     for (let k = 1; k <= ahead; k++) this.prime(idx + k);
   }
 
-  // 샷 배속(rate)을 video 엘리먼트에 적용
+  // 샷 배속(rate)을 video 엘리먼트에 적용 — 최종 배속(v1.7)까지 곱해 영상 진행이 소리와 같이 간다
   applyRate(v, shot) {
     if (!v) return;
-    const r = shotRate(shot);
+    const sp = clampNum(this.speed, 0.25, 4, 1);
+    const r = clamp(shotRate(shot) * sp, 0.0625, 16);
     try { if (v.defaultPlaybackRate !== r) v.defaultPlaybackRate = r; } catch (e) {}
     try { if (Math.abs((v.playbackRate || 1) - r) > 0.001) v.playbackRate = r; } catch (e) {}
   }
@@ -471,10 +477,15 @@ function voiceFxChain(ctx, src, dst) {
 // ──────────────────────────────────────────────────────
 // 믹스 스케줄 (미리듣기 = 실시간, WAV = 오프라인 공용)
 // opts.from: 타임라인의 어느 지점(초)부터 재생할지 — 플레이헤드 미리듣기용
+// opts.speed: 최종 배속(v1.7) — 모두 같은 배율로 눌러 재생해 영상·소리 싱크를 유지한다.
+//   배경노래 · 장르 비트 · 옹알이 세 트랙이 한 타임라인에서 같이 빨라지거나 느려진다.
 function scheduleMix(ctx, out, arr, t0, beatBuf, opts = {}) {
   const stops = [];
+  const sp = clampNum(opts.speed, 0.25, 4, 1);
   const from = clampNum(opts.from, 0, Math.max(0, arr.total - 0.02), 0);
-  const endAt = t0 + Math.max(0.02, arr.total - from);
+  const span = Math.max(0.02, arr.total - from);
+  const endAt = t0 + span / sp;
+  const T = (t) => t0 + Math.max(0, t - from) / sp;   // 타임라인 초 → 출력 초
   const master = ctx.createGain();
   master.gain.setValueAtTime(0.9, t0);
   master.gain.setValueAtTime(0.9, Math.max(t0 + 0.02, endAt - 0.06));
@@ -498,72 +509,101 @@ function scheduleMix(ctx, out, arr, t0, beatBuf, opts = {}) {
     wetGain.connect(master);
   }
 
-  // 반주 — 🎵 비트 트랙(시작 오프셋·사용 길이·볼륨·페이드 인/아웃)
-  const bt = arr.beatTrack || { start: 0, end: arr.total, len: arr.total, vol: 1, fadeIn: 0, fadeOut: 0, srcOffset: 0 };
-  const bStart = Math.max(bt.start, from);
-  const bEnd = Math.min(bt.end, arr.total);
-  const bSpan = bEnd - bStart;
-  if (bSpan > 0.03) {
-    const at = t0 + (bStart - from);
-    const bg = ctx.createGain();
-    const norm = (S.beatMode === 'file' && S.backing) ? (S.backing.norm || 1) : 1;
-    const bVol = Math.max(0.0001, S.mix.beatVol * (bt.vol == null ? 1 : bt.vol) * norm);
-    const fi = bStart <= bt.start + 0.005 ? Math.min(bt.fadeIn || 0, bSpan * 0.5) : 0;
-    const fo = Math.min(bt.fadeOut || 0, bSpan * 0.5);
-    bg.gain.setValueAtTime(fi > 0 ? 0.0001 : bVol, at);
-    if (fi > 0) bg.gain.linearRampToValueAtTime(bVol, at + fi);
-    if (fo > 0) {
-      bg.gain.setValueAtTime(bVol, Math.max(at + fi, at + bSpan - fo));
-      bg.gain.linearRampToValueAtTime(0.0001, at + bSpan);
+  // 반주 — 🎵 배경노래 트랙 + 🥁 장르 비트 트랙 (v1.7 3단 믹싱)
+  //  · 배경노래는 박자에 맞춰 깔리고(전체 선택 구간 루프), 옹알이가 터질 때 살짝 눌린다(덕킹)
+  //  · 장르 비트는 노래 BPM 그리드에 맞춰 그 위에 얹힌다(둘을 같이 켤 수 있다)
+  const duckDb = clampNum(S.beatDuck, 0, 12, 0);
+  const duckEvents = (gainNode, vBase, a, b) => {
+    if (duckDb <= 0.2) return;
+    const duck = Math.pow(10, -duckDb / 20);
+    for (const ev of arr.voiceEvents) {
+      const evDur = (ev.bufEnd - ev.bufStart) / (ev.rate || 1);
+      const s0 = Math.max(ev.tStart, a);
+      const e0 = Math.min(ev.tStart + evDur, b);
+      if (e0 - s0 < 0.05) continue;
+      let at0 = T(s0) - 0.03 / sp;
+      if (at0 < t0) at0 = t0;
+      if (at0 > endAt - 0.05) continue;
+      gainNode.gain.setValueAtTime(Math.max(0.0001, vBase * duck), at0);
+      gainNode.gain.linearRampToValueAtTime(vBase, Math.min(endAt, at0 + 0.16 / sp));
     }
-    // 사이드체인 덕킹: 옹알이 조각이 터지는 순간 가져온 음원을 -4~-6dB 눌렀다가 천천히 올린다.
-    const duckDb = clampNum(S.beatDuck, 0, 12, 0);
-    if (S.beatMode === 'file' && duckDb > 0.2) {
-      const duck = Math.pow(10, -duckDb / 20);
-      for (const ev of arr.voiceEvents) {
-        const evDur = (ev.bufEnd - ev.bufStart) / (ev.rate || 1);
-        const s0 = Math.max(ev.tStart, bStart);
-        const e0 = Math.min(ev.tStart + evDur, bEnd);
-        if (e0 - s0 < 0.05) continue;
-        let at0 = t0 + (s0 - from) - 0.03;
-        const minAt = at + (fi > 0 ? fi : 0);
-        if (at0 < minAt) at0 = minAt;
-        if (at0 > endAt - 0.05) continue;
-        bg.gain.setValueAtTime(Math.max(0.0001, bVol * duck), at0);
-        bg.gain.linearRampToValueAtTime(bVol, Math.min(endAt, at0 + 0.16));
+  };
+
+  // 🎵 배경노래
+  if (S.songOn !== false && S.backing && S.backing.buffer && arr.songTrack) {
+    const st = arr.songTrack;
+    const sStart = Math.max(st.start, from);
+    const sEnd = Math.min(st.end, arr.total);
+    const sSpan = sEnd - sStart;
+    if (sSpan > 0.03) {
+      const at = T(sStart);
+      const sg = ctx.createGain();
+      const norm = S.backing.norm || 1;
+      const sVol = Math.max(0.0001, (st.vol == null ? 1 : st.vol) * norm);
+      const fi = (sStart <= st.start + 0.005 ? Math.min(st.fadeIn || 0, sSpan * 0.5) : 0) / sp;
+      const fo = Math.min(st.fadeOut || 0, sSpan * 0.5) / sp;
+      sg.gain.setValueAtTime(fi > 0 ? 0.0001 : sVol, at);
+      if (fi > 0) sg.gain.linearRampToValueAtTime(sVol, at + fi);
+      if (fo > 0) {
+        sg.gain.setValueAtTime(sVol, Math.max(at + fi, at + sSpan / sp - fo));
+        sg.gain.linearRampToValueAtTime(0.0001, at + sSpan / sp);
       }
-    }
-    bg.connect(master);
-    let bsrc = null;
-    if (S.beatMode === 'file' && S.backing) {
-      bsrc = ctx.createBufferSource();
+      duckEvents(sg, sVol, sStart, sEnd);
+      sg.connect(master);
+      const bsrc = ctx.createBufferSource();
       bsrc.buffer = S.backing.buffer;
-      bsrc.connect(bg);
-      const tA = clamp(S.trim.start, 0, Math.max(0, S.backing.duration - 0.2));
-      const tB = clamp(S.trim.end, tA + 0.25, S.backing.duration);
-      const srcStart = clamp(tA + S.offsetBack + (bt.srcOffset || 0), tA, tB - 0.2);
-      const loopEnd = Math.min(tB, srcStart + arr.bar * 4);
-      const loopLen = Math.max(0.2, loopEnd - srcStart);
+      bsrc.connect(sg);
+      try { bsrc.playbackRate.value = sp; } catch (e) {}
+      const dur = S.backing.duration;
+      const tA = clamp(S.trim.start, 0, Math.max(0, dur - 0.2));
+      const tB = clamp(S.trim.end, tA + 0.25, dur);
+      const srcStart = clamp(tA + (S.offsetBack || 0) + (st.srcOffset || 0), tA, Math.max(tA, tB - 0.2));
+      const loopLen = Math.max(0.2, tB - srcStart);
+      // 타임라인 0초 = 노래의 다운비트. 트랙을 늦게 시작해도 그 지점이 전역 박자선 위에 오도록 위상을 잡는다.
+      let phase = (sStart * sp) % loopLen;
+      if (phase < 0) phase += loopLen;
       bsrc.loop = true;
       bsrc.loopStart = srcStart;
-      bsrc.loopEnd = Math.max(srcStart + 0.2, loopEnd);
-      let phase = (bStart - bt.start) % loopLen;
-      if (phase < 0) phase += loopLen;
-      bsrc.start(at, srcStart + phase);
-      bsrc.stop(at + bSpan + 0.03);
+      bsrc.loopEnd = srcStart + loopLen;
+      bsrc.start(at, Math.min(srcStart + phase, Math.max(0, dur - 0.02)), sSpan);
+      bsrc.stop(at + sSpan / sp + 0.03);
       stops.push(bsrc);
-    } else if (beatBuf) {
-      bsrc = ctx.createBufferSource();
-      bsrc.buffer = beatBuf;
-      bsrc.connect(bg);
-      const off = Math.max(0, bStart - bt.start);
-      bsrc.start(at, Math.min(off, Math.max(0, beatBuf.duration - 0.05)), Math.min(bSpan, Math.max(0, beatBuf.duration - off)));
-      stops.push(bsrc);
+      stops.push({ stop() { try { sg.disconnect(); } catch (e) {} } });
     }
-    stops.push({ stop() { try { bg.disconnect(); } catch (e) {} } });
   }
 
-  // 목소리 구간 — 조각별 볼륨(ev.gain) · 트랙 볼륨 · 음역 필터
+  // 🥁 장르 비트
+  if (S.beatOn !== false && beatBuf) {
+    const bt = arr.beatTrack || { start: 0, end: arr.total, len: arr.total, vol: 1, fadeIn: 0, fadeOut: 0, srcOffset: 0 };
+    const bStart = Math.max(bt.start, from);
+    const bEnd = Math.min(bt.end, arr.total);
+    const bSpan = bEnd - bStart;
+    if (bSpan > 0.03) {
+      const at = T(bStart);
+      const bg = ctx.createGain();
+      const bVol = Math.max(0.0001, S.mix.beatVol * (bt.vol == null ? 1 : bt.vol));
+      const fi = (bStart <= bt.start + 0.005 ? Math.min(bt.fadeIn || 0, bSpan * 0.5) : 0) / sp;
+      const fo = Math.min(bt.fadeOut || 0, bSpan * 0.5) / sp;
+      bg.gain.setValueAtTime(fi > 0 ? 0.0001 : bVol, at);
+      if (fi > 0) bg.gain.linearRampToValueAtTime(bVol, at + fi);
+      if (fo > 0) {
+        bg.gain.setValueAtTime(bVol, Math.max(at + fi, at + bSpan / sp - fo));
+        bg.gain.linearRampToValueAtTime(0.0001, at + bSpan / sp);
+      }
+      duckEvents(bg, bVol, bStart, bEnd);
+      bg.connect(master);
+      const bsrc = ctx.createBufferSource();
+      bsrc.buffer = beatBuf;
+      bsrc.connect(bg);
+      try { bsrc.playbackRate.value = sp; } catch (e) {}
+      const off = Math.max(0, (bStart - bt.start) * sp);
+      bsrc.start(at, Math.min(off, Math.max(0, beatBuf.duration - 0.05)), Math.min(bSpan * sp, Math.max(0.02, beatBuf.duration - off)));
+      stops.push(bsrc);
+      stops.push({ stop() { try { bg.disconnect(); } catch (e) {} } });
+    }
+  }
+
+  // 목소리 구간 — 조각별 볼륨(ev.gain) · 트랙 볼륨 · 음역 필터 · 최종 배속(sp)
   if (S.voice && S.voice.buffer) {
     const trackVol = clampNum(S.voiceTrack && S.voiceTrack.vol, 0, 1.5, 1);
     for (const ev of arr.voiceEvents) {
@@ -575,23 +615,24 @@ function scheduleMix(ctx, out, arr, t0, beatBuf, opts = {}) {
       const dur = evDur - skip;
       if (dur < 0.02) continue;
       const bufStart = ev.bufStart + skip * rate;
-      const at = t0 + Math.max(0, ev.tStart - from);
+      const at = T(ev.tStart + skip);
+      const outDur = dur / sp;                      // 출력에서 차지하는 시간
       const src = ctx.createBufferSource();
       src.buffer = S.voice.buffer;
-      try { src.playbackRate.value = rate; } catch (e) {}
+      try { src.playbackRate.value = rate * sp; } catch (e) {}
       const g = ctx.createGain();
       const vg = Math.max(0.0001, S.mix.voiceVol * (ev.gain == null ? 1 : ev.gain) * trackVol);
       g.gain.setValueAtTime(0.0001, at);
-      g.gain.linearRampToValueAtTime(vg, at + Math.min(0.012, dur * 0.2));
-      g.gain.setValueAtTime(vg, at + Math.max(0.013, dur - 0.025));
-      g.gain.linearRampToValueAtTime(0.0001, at + dur);
+      g.gain.linearRampToValueAtTime(vg, at + Math.min(0.012 / sp, outDur * 0.2));
+      g.gain.setValueAtTime(vg, at + Math.max(0.013 / sp, outDur - 0.025 / sp));
+      g.gain.linearRampToValueAtTime(0.0001, at + outDur);
       const chain = voiceFxChain(ctx, src, g);
       if (chain) stops.push({ stop() { for (const f of chain) { try { f.disconnect(); } catch (e) {} } } });
       g.connect(master);
       if (conv) { const send = ctx.createGain(); send.gain.value = S.mix.reverb; g.connect(send); send.connect(conv); }
       try {
         src.start(at, Math.min(bufStart, Math.max(0, S.voice.buffer.duration - 0.01)), dur * rate);
-        src.stop(at + dur + 0.04);
+        src.stop(at + outDur + 0.04);
       } catch (e) {}
       stops.push(src);
     }
@@ -612,7 +653,7 @@ let previewBusy = false;
 
 async function play() {
   if (playing) { stopPlayback(); return; }
-  if (!S.voice && !S.videoUrl && !(S.beatMode === 'file' && S.backing)) {
+  if (!S.voice && !S.videoUrl && !(S.songOn !== false && S.backing)) {
     toast('먼저 다인 영상을 올려 주세요');
     return;
   }
@@ -624,17 +665,19 @@ async function play() {
     try { await ctx.resume(); } catch (e) {}
     const arr = rebuild();
     if (!arr.total) return;
-    const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
+    const beatBuf = S.beatOn !== false ? await getBeatBuffer(ctx, arr) : null;
     stopAllPreviewAudio();
+    const speed = clampNum(S.outputSpeed, 0.25, 4, 1);
     const t0 = ctx.currentTime + 0.35;
-    const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf);
-    playState = { t0, mix, arr, start: performance.now(), started: false };
+    const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf, { speed });
+    playState = { t0, mix, arr, start: performance.now(), started: false, speed };
     playing = true;
     el.btnPlay.textContent = '■ 정지';
     el.btnStop.hidden = false;
     el.playDot.classList.add('on');
     // 프리롤(t<0) 동안에는 영상을 틀지 않는다 — 음악이 시작되는 t=0에 맞춰 출발해야
     // 미리보기 영상이 소리보다 먼저 흘러가지 않는다(v1.6).
+    engine.speed = speed;
     await engine.startAt(0, false);
     loop();
   } finally {
@@ -645,15 +688,14 @@ async function play() {
 function loop() {
   if (!playing || !playState) return;
   const ctx = audioCtx();
-  const t = ctx.currentTime - playState.t0;
+  const t = (ctx.currentTime - playState.t0) * (playState.speed || 1);   // 타임라인 초(배속 반영)
   const arr = playState.arr;
   if (t >= arr.total + 0.02) { stopPlayback(); return; }
   const show = Math.max(0, t);
   if (t >= 0 && playState && !playState.started) {   // 음악과 동시에 영상 출발
     playState.started = true;
     engine.playNow();
-  }
-  if (t >= -0.001) {
+  }  if (t >= -0.001) {
     engine.sync(show);
     engine.follow(show);
   }
@@ -915,21 +957,30 @@ function scheduleGrid() {
   gridTimer = setTimeout(() => { if (S.backing) applyGrid(true); }, 260);
 }
 
-async function onBackFile(file) {
-  if (!file) return;
+async function onBackFile(file, opts = {}) {
+  if (!file) return false;
   stopAllPreviewAudio();
-  setStatus('음원을 분석하는 중…');
+  setStatus('배경노래를 분석하는 중…');
+  el.songUrlMsg && (el.songUrlMsg.className = 'status', el.songUrlMsg.textContent = '');
   const ctx = audioCtx();
   try {
     const buf = await decodeMediaFile(ctx, file, (p, msg) => { if (msg) setStatus(msg); });
-    S.backing = { name: file.name, buffer: buf, peaks: waveformPeaks(buf, 1400), duration: buf.duration, norm: clamp(0.6 / Math.max(0.01, peakOf(buf)), 0.5, 6) };
+    S.backing = {
+      name: opts.name || file.name,
+      buffer: buf,
+      peaks: waveformPeaks(buf, 1400),
+      duration: buf.duration,
+      norm: clamp(0.6 / Math.max(0.01, peakOf(buf)), 0.5, 6),
+      kind: opts.kind || 'file',
+    };
+    S.songOn = true;
     S.trim = { start: 0, end: Math.min(buf.duration, 30) };
     S.offsetBack = 0;
-    S.beatMode = 'file';
-    syncBeatMode();
+    S.songTrack = { ...(S.songTrack || {}), start: 0, len: 0, srcOffset: 0 };
+    S.voiceClips = null;          // 노래가 바뀌면 박자 그리드도 바뀌므로 자동 배치로
     el.backLoaded.hidden = false;
     el.dropBack.style.display = 'none';
-    el.backName.textContent = file.name;
+    el.backName.textContent = S.backing.name;
     el.backDur.textContent = `${buf.duration.toFixed(1)}초`;
     el.trimStartNum.max = buf.duration.toFixed(1);
     el.trimEndNum.max = buf.duration.toFixed(1);
@@ -940,27 +991,86 @@ async function onBackFile(file) {
     el.offsetBack.value = '0';
     drawBackWave();
     const est = estimateBpm(buf);
-    el.bpmEst.textContent = est ? `${est.bpm}` : '–';
-    el.btnBpmApply.hidden = !est;
-    el.btnBpmApply.dataset.bpm = est ? String(est.bpm) : '';
+    S.songBpm = est && est.bpm ? clamp(Math.round(est.bpm), 60, 200) : 0;
+    el.bpmEst.textContent = S.songBpm ? `${S.songBpm}` : '–';
+    el.btnBpmApply.hidden = !S.songBpm;
+    el.btnBpmApply.dataset.bpm = S.songBpm ? String(S.songBpm) : '';
     // 추정 BPM을 그대로 쓰면 박자 그리드·컷이 노래와 어긋난다 → 신뢰도가 있으면 자동 적용
-    if (est && est.bpm && Math.abs(est.bpm - S.bpm) > 0.5) {
+    if (S.songBpm && Math.abs(S.songBpm - S.bpm) > 0.5) {
       const keepTotal = S.arr ? S.arr.total : 0;
-      S.bpm = clamp(Math.round(est.bpm), 90, 160);
+      S.bpm = clamp(Math.round(S.songBpm), 90, 160);
       el.bpm.value = String(S.bpm);
       el.bpmOut.textContent = String(S.bpm);
       fitAutoTitles();
       if (keepTotal > 2) S.sections = fitToSeconds(S.sections, S.bpm, keepTotal);
-      toast(`추정 BPM ${S.bpm}로 박자를 자동으로 맞췄어요`);
+      toast(`추정 BPM ${S.songBpm}로 박자를 자동으로 맞췄어요`);
     }
     applyGrid(true);
+    syncMixMode();
     rebuild();
-    setStatus(`${file.name} · ${buf.duration.toFixed(1)}초${est ? ` · 추정 ${est.bpm} BPM` : ''} · 첫 박 +${(S.offsetBack || 0).toFixed(2)}초`);
-    toast('음원을 불러왔어요. 쓸 구간을 골라 주세요');
+    saveState();
+    setStatus(`${S.backing.name} · ${buf.duration.toFixed(1)}초${S.songBpm ? ` · 추정 ${S.songBpm} BPM` : ''} · 첫 박 +${(S.offsetBack || 0).toFixed(2)}초`);
+    toast(opts.kind === 'url' ? '링크에서 배경노래를 불러왔어요' : '배경노래를 불러왔어요. 쓸 구간을 골라 주세요');
+    return true;
   } catch (e) {
     const why = (e && (e.userMessage || e.message)) || '이 파일의 오디오를 읽지 못했어요 (MP3/M4A/WAV 권장)';
+    if (opts.kind === 'url') {
+      el.songUrlMsg.className = 'status err';
+      el.songUrlMsg.textContent = `이 링크의 소리를 읽지 못했어요 · ${why}`;
+    }
     toast(why, 3400);
-    setStatus(`음원을 읽지 못했어요 · ${why}`);
+    setStatus(`배경노래를 읽지 못했어요 · ${why}`);
+    return false;
+  }
+}
+
+// 🎵 음악·동영상 URL로 배경노래 넣기 (v1.7)
+//  · 직접 오디오/비디오 주소면 fetch → 디코딩(영상이면 오디오 트랙만 추출)
+//  · CORS·플랫폼(유튜브 등) 차단이면 멈추지 않고 한국어로 다음 방법을 안내한다.
+function YouTubeUrl(u) {
+  return /(^|\/\/)((www|m)\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(u);
+}
+
+async function loadSongFromUrl() {
+  const url = (el.songUrl.value || '').trim();
+  el.songUrlMsg.className = 'status';
+  el.songUrlMsg.textContent = '';
+  if (!/^https?:\/\//i.test(url)) {
+    el.songUrlMsg.className = 'status err';
+    el.songUrlMsg.textContent = 'https:// 로 시작하는 음악·동영상 주소를 넣어 주세요.';
+    return;
+  }
+  if (YouTubeUrl(url)) {
+    el.songUrlMsg.className = 'status err';
+    el.songUrlMsg.innerHTML = '유튜브 링크는 브라우저가 직접 가져오지 못해요(차단). 아래 <b>유튜브 링크로 가져오기</b>를 눌러 보거나, 유튜브 화면 녹화 영상·저장한 음원 파일을 올려주세요.';
+    return;
+  }
+  stopAllPreviewAudio();
+  el.songUrlMsg.textContent = '링크에서 소리를 받는 중…';
+  setStatus('배경노래를 받는 중…');
+  try {
+    const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    if (blob.size < 2048) throw new Error('파일이 너무 작아요');
+    let name = '배경노래';
+    try { name = decodeURIComponent((url.split('/').pop() || '').split('?')[0]) || name; } catch (e) {}
+    const type = blob.type && /^(audio|video)\//.test(blob.type) ? blob.type : (/\.[a-z0-9]+$/i.test(name) ? '' : 'audio/mpeg');
+    const file = new File([blob], name, { type });
+    const ok = await onBackFile(file, { kind: 'url', name });
+    if (ok) {
+      el.songUrlMsg.className = 'status ok';
+      el.songUrlMsg.textContent = '링크에서 배경노래를 불러왔어요. 구간을 골라 주세요.';
+      el.songUrl.value = '';
+    } else {
+      el.songUrlMsg.className = 'status err';
+      el.songUrlMsg.innerHTML = '링크는 열렸지만 이 형식의 소리를 브라우저가 읽지 못했어요. MP3·M4A·WAV 파일이나 MP4·MOV 영상으로 올려주세요.';
+    }
+  } catch (e) {
+    const why = String((e && e.message) || e);
+    el.songUrlMsg.className = 'status err';
+    el.songUrlMsg.innerHTML = `이 링크는 보안(CORS)·접속 제한으로 직접 불러올 수 없어요. <b>폰에 저장된 파일</b>이나 <b>화면녹화 영상</b>으로 올려주세요.<br><span class="dim">${why.slice(0, 90)}</span>`;
+    setStatus('링크를 직접 불러오지 못했어요 (CORS)');
   }
 }
 
@@ -1094,24 +1204,50 @@ function renderTimeline() {
     el.tlVoiceLane.appendChild(b);
   });
 
-  // 🎵 비트 트랙
+  // 🎵 배경노래 트랙
+  if (el.tlSongLane) {
+    el.tlSongLane.innerHTML = '';
+    const st = arr.songTrack || { start: 0, len: 0, vol: 1 };
+    const song = document.createElement('div');
+    song.dataset.id = 'song';
+    song.dataset.kind = 'song';
+    if (!S.backing || S.songOn === false) {
+      song.className = 'tlbeat empty' + (tl.sel === 'song' ? ' sel' : '');
+      song.style.left = '0%';
+      song.style.width = '100%';
+      song.innerHTML = `<span class="tlclip-t">${S.backing ? '🎵 배경노래 꺼짐 · 눌러서 켜기' : '🎵 배경노래를 올리면 여기에 놓여요'}</span>`;
+      song.title = S.backing ? '배경노래 끄기 상태 — 눌러서 켜기' : '배경노래 없음';
+    } else {
+      song.className = 'tlbeat song' + (tl.sel === 'song' ? ' sel' : '');
+      song.style.left = pct(st.start);
+      song.style.width = `${(Math.max(0.1, st.len) / total) * 100}%`;
+      const nm = (S.backing.name || '배경노래').replace(/\.[a-z0-9]+$/i, '');
+      song.title = `배경노래 ${st.start.toFixed(2)}–${st.end.toFixed(2)}초 · 볼륨 ${Math.round((st.vol == null ? 1 : st.vol) * 100)}%`;
+      song.innerHTML = `<span class="tlclip-t">🎵 ${nm}</span><i class="tlh tlh-l" data-h="l"></i><i class="tlh tlh-r" data-h="r"></i>`;
+    }
+    el.tlSongLane.appendChild(song);
+  }
+
+  // 🥁 장르 비트 트랙
   el.tlBeatLane.innerHTML = '';
   const bt = arr.beatTrack;
   const beat = document.createElement('div');
-  beat.className = 'tlbeat' + (tl.sel === 'beat' ? ' sel' : '');
+  beat.className = 'tlbeat' + (S.beatOn === false ? ' beatoff' : '') + (tl.sel === 'beat' ? ' sel' : '');
   beat.dataset.id = 'beat';
   beat.dataset.kind = 'beat';
   beat.style.left = pct(bt.start);
   beat.style.width = `${(Math.max(0.1, bt.len) / total) * 100}%`;
-  const beatName = S.beatMode === 'synth'
-    ? `${GENRES[S.genre].label} ${S.bpm} BPM`
-    : (S.backing ? S.backing.name.replace(/\.[a-z0-9]+$/i, '') : '내 음원');
-  beat.title = `비트 ${bt.start.toFixed(2)}–${bt.end.toFixed(2)}초 · 볼륨 ${Math.round((bt.vol == null ? 1 : bt.vol) * 100)}%`;
-  beat.innerHTML = `<span class="tlclip-t">🎵 ${beatName}</span><i class="tlh tlh-l" data-h="l"></i><i class="tlh tlh-r" data-h="r"></i>`;
+  const beatName = S.beatOn === false ? '장르 비트 끔' : `${(GENRES[S.genre] || GENRES.techno).label} ${S.bpm} BPM`;
+  beat.title = `장르 비트 ${bt.start.toFixed(2)}–${bt.end.toFixed(2)}초 · 볼륨 ${Math.round((bt.vol == null ? 1 : bt.vol) * 100)}%`;
+  beat.innerHTML = `<span class="tlclip-t">${S.beatOn === false ? '🔇' : '🥁'} ${beatName}</span><i class="tlh tlh-l" data-h="l"></i><i class="tlh tlh-r" data-h="r"></i>`;
   el.tlBeatLane.appendChild(beat);
 
   if (el.tlInfo) {
-    el.tlInfo.textContent = `총 ${total.toFixed(1)}초 · 조각 ${arr.voiceEvents.length}개 · 비트 ${bt.start.toFixed(1)}–${bt.end.toFixed(1)}초`;
+    const on = [];
+    if (S.backing && S.songOn !== false) on.push('노래');
+    if (S.beatOn !== false) on.push('비트');
+    on.push('옹알이');
+    el.tlInfo.textContent = `${on.join('+')} · 총 ${total.toFixed(1)}초 · 조각 ${arr.voiceEvents.length}개`;
   }
   if (el.tlAuto) el.tlAuto.hidden = !clipList();
   syncTlSliders();
@@ -1144,6 +1280,27 @@ function syncTlSliders() {
   el.btFadeInOut.textContent = `${clampNum(bt.fadeIn, 0, 5, 0).toFixed(2)}초`;
   el.btFadeOut.value = String(clampNum(bt.fadeOut, 0, 5, 0));
   el.btFadeOutOut.textContent = `${clampNum(bt.fadeOut, 0, 5, 0).toFixed(2)}초`;
+  // 🎵 배경노래 트랙
+  const st = (arr.songTrack || {});
+  if (el.stStart) {
+    el.stStart.max = total.toFixed(1);
+    el.stStart.value = String(clampNum(st.start, 0, total, 0));
+    el.stStartOut.textContent = `${clampNum(st.start, 0, total, 0).toFixed(2)}초`;
+    el.stLen.max = total.toFixed(1);
+    const slen = clampNum(st.len, 0, total, 0);
+    el.stLen.value = String(slen > 0.05 ? slen : total);
+    el.stLenOut.textContent = slen > 0.05 ? `${slen.toFixed(2)}초` : '끝까지';
+    el.stVol.value = String(clampNum(st.vol, 0, 1.5, 1));
+    el.stVolOut.textContent = `${Math.round(clampNum(st.vol, 0, 1.5, 1) * 100)}%`;
+    el.stFadeIn.value = String(clampNum(st.fadeIn, 0, 5, 0));
+    el.stFadeInOut.textContent = `${clampNum(st.fadeIn, 0, 5, 0).toFixed(2)}초`;
+    el.stFadeOut.value = String(clampNum(st.fadeOut, 0, 5, 0));
+    el.stFadeOutOut.textContent = `${clampNum(st.fadeOut, 0, 5, 0).toFixed(2)}초`;
+  }
+  if (el.songVol && S.songTrack) {
+    el.songVol.value = String(clampNum(S.songTrack.vol, 0, 1.5, 1));
+    el.songVolOut.textContent = `${Math.round(clampNum(S.songTrack.vol, 0, 1.5, 1) * 100)}%`;
+  }
   if (el.btDuck) {
     const d = clampNum(S.beatDuck, 0, 10, 0);
     el.btDuck.value = String(d);
@@ -1175,8 +1332,8 @@ function updateTlPanel() {
   if (!panel) return;
   const arr = S.arr;
   if (!arr || !tl.sel) { panel.hidden = true; return; }
-  if (tl.sel === 'beat') {
-    // 비트 블록은 아래 '🎵 비트 트랙' 슬라이더로 조절하므로 조각 패널은 띄우지 않는다.
+  if (tl.sel === 'beat' || tl.sel === 'song') {
+    // 비트·노래 블록은 아래 '트랙 슬라이더'로 조절하므로 조각 패널은 띄우지 않는다.
     panel.hidden = true;
     return;
   }
@@ -1214,11 +1371,12 @@ async function tlPlayToggle() {
     const arr = rebuild();
     if (!arr.total) return;
     const from = clampNum(tl.t, 0, Math.max(0, arr.total - 0.15), 0);
-    const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
+    const beatBuf = S.beatOn !== false ? await getBeatBuffer(ctx, arr) : null;
     stopAllPreviewAudio();
+    const speed = clampNum(S.outputSpeed, 0.25, 4, 1);
     const t0 = ctx.currentTime + 0.18;
-    const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf, { from });
-    tl.state = { t0, from, arr, mix };
+    const mix = scheduleMix(ctx, ctx.destination, arr, t0, beatBuf, { from, speed });
+    tl.state = { t0, from, arr, mix, speed };
     tl.playing = true;
     el.tlPlay.textContent = '■ 멈춤';
     loopTl();
@@ -1230,7 +1388,7 @@ async function tlPlayToggle() {
 function loopTl() {
   if (!tl.playing || !tl.state) return;
   const ctx = audioCtx();
-  const t = tl.state.from + (ctx.currentTime - tl.state.t0);
+  const t = tl.state.from + (ctx.currentTime - tl.state.t0) * (tl.state.speed || 1);
   if (t >= tl.state.arr.total - 0.01) { tlStop(true); return; }
   if (t >= 0) {
     tl.t = Math.max(0, t);
@@ -1279,6 +1437,21 @@ function beginDrag(e, block) {
       id, kind, mode: handle ? (handle.dataset.h === 'l' ? 'resize-l' : 'resize-r') : 'move',
       x0: e.clientX, t0: t, at0: clip.at, len0: clip.len, block,
     };
+  } else if (kind === 'song') {
+    if (!S.backing) { el.fileBack.click(); return; }
+    if (S.songOn === false) {
+      S.songOn = true;
+      syncMixMode(); rebuild(); saveState(); renderTimeline();
+      toast('🎵 배경노래를 켰어요');
+      return;
+    }
+    const st = S.songTrack || (S.songTrack = {});
+    const start = clampNum(st.start, 0, arr.total, 0);
+    const len = clampNum(st.len, 0, arr.total, 0) || Math.max(0.2, arr.total - start);
+    tl.drag = {
+      id: 'song', kind: 'song', mode: handle ? (handle.dataset.h === 'l' ? 'resize-l' : 'resize-r') : 'move',
+      x0: e.clientX, t0: t, at0: start, len0: len, block,
+    };
   } else {
     const bt = S.beatTrack;
     const start = clampNum(bt.start, 0, arr.total, 0);
@@ -1290,8 +1463,9 @@ function beginDrag(e, block) {
   }
   try { block.setPointerCapture(e.pointerId); } catch (err) {}
   block.classList.add('drag');
-  el.tlVoiceLane.querySelectorAll('.tlclip.sel, .tlbeat.sel').forEach((n) => n.classList.remove('sel'));
-  el.tlBeatLane.querySelectorAll('.tlclip.sel, .tlbeat.sel').forEach((n) => n.classList.remove('sel'));
+  [el.tlVoiceLane, el.tlSongLane, el.tlBeatLane].forEach((ln) => {
+    if (ln) ln.querySelectorAll('.tlclip.sel, .tlbeat.sel').forEach((n) => n.classList.remove('sel'));
+  });
   block.classList.add('sel');
   showTlPanel();
   e.preventDefault();
@@ -1327,23 +1501,25 @@ function moveDrag(e) {
     if (el.tlpLen) el.tlpLen.value = String(Math.min(clip.len, +el.tlpLen.max));
     if (el.tlpLenOut) el.tlpLenOut.textContent = `${Math.min(clip.len, +el.tlpLen.max).toFixed(2)}초`;
   } else {
-    const bt = S.beatTrack;
+    const tr = d.kind === 'song' ? S.songTrack : S.beatTrack;
     if (d.mode === 'move') {
-      bt.start = +clamp(snap(d.at0 + dt), 0, Math.max(0, total - 0.2)).toFixed(3);
-      bt.len = +Number(d.len0).toFixed(3);
-      d.block.style.left = `${(bt.start / total) * 100}%`;
+      tr.start = +clamp(snap(d.at0 + dt), 0, Math.max(0, total - 0.2)).toFixed(3);
+      tr.len = +Number(d.len0).toFixed(3);
+      d.block.style.left = `${(tr.start / total) * 100}%`;
     } else if (d.mode === 'resize-r') {
-      bt.len = +clamp(snap(d.len0 + dt), 0.2, Math.max(0.2, total - bt.start)).toFixed(3);
-      d.block.style.width = `${(bt.len / total) * 100}%`;
+      tr.len = +clamp(snap(d.len0 + dt), 0.2, Math.max(0.2, total - tr.start)).toFixed(3);
+      d.block.style.width = `${(tr.len / total) * 100}%`;
     } else if (d.mode === 'resize-l') {
       const start = clamp(snap(d.at0 + dt), 0, d.at0 + d.len0 - 0.2);
-      bt.start = +start.toFixed(3);
-      bt.len = +(d.len0 - (start - d.at0)).toFixed(3);
-      d.block.style.left = `${(bt.start / total) * 100}%`;
-      d.block.style.width = `${(bt.len / total) * 100}%`;
+      tr.start = +start.toFixed(3);
+      tr.len = +(d.len0 - (start - d.at0)).toFixed(3);
+      d.block.style.left = `${(tr.start / total) * 100}%`;
+      d.block.style.width = `${(tr.len / total) * 100}%`;
     }
     syncTlSliders();
-    if (el.tlInfo) el.tlInfo.textContent = `비트 ${bt.start.toFixed(2)}–${(bt.start + bt.len).toFixed(2)}초`;
+    if (el.tlInfo) {
+      el.tlInfo.textContent = `${d.kind === 'song' ? '🎵 노래' : '🥁 비트'} ${tr.start.toFixed(2)}–${(tr.start + tr.len).toFixed(2)}초`;
+    }
   }
   e.preventDefault();
 }
@@ -1375,7 +1551,7 @@ function showTlPanel() {
 }
 
 function bindTimeline() {
-  const lanes = [el.tlVoiceLane, el.tlBeatLane].filter(Boolean);
+  const lanes = [el.tlVoiceLane, el.tlSongLane, el.tlBeatLane].filter(Boolean);
   lanes.forEach((lane) => {
     lane.addEventListener('pointerdown', (e) => {
       const block = e.target.closest('.tlclip, .tlbeat');
@@ -1421,6 +1597,22 @@ function bindTimeline() {
     (v) => `${Math.round(v * 100)}%`);
   onRange(el.btStart, el.btStartOut,
     (v) => { S.beatTrack = { ...(S.beatTrack || {}), start: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  // 🎵 배경노래 트랙 슬라이더
+  onRange(el.stStart, el.stStartOut,
+    (v) => { S.songTrack = { ...(S.songTrack || {}), start: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.stLen, el.stLenOut,
+    (v) => { S.songTrack = { ...(S.songTrack || {}), len: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.stVol, el.stVolOut,
+    (v) => { S.songTrack = { ...(S.songTrack || {}), vol: v }; },
+    (v) => `${Math.round(v * 100)}%`);
+  onRange(el.stFadeIn, el.stFadeInOut,
+    (v) => { S.songTrack = { ...(S.songTrack || {}), fadeIn: v }; },
+    (v) => `${v.toFixed(2)}초`);
+  onRange(el.stFadeOut, el.stFadeOutOut,
+    (v) => { S.songTrack = { ...(S.songTrack || {}), fadeOut: v }; },
     (v) => `${v.toFixed(2)}초`);
   onRange(el.btLen, el.btLenOut,
     (v) => { S.beatTrack = { ...(S.beatTrack || {}), len: v }; },
@@ -1473,8 +1665,9 @@ function bindTimeline() {
     });
     el.tlpClose.addEventListener('click', () => { tl.sel = null; updateTlPanel(); renderTimeline(); });
     el.tlpPlay.addEventListener('click', () => {
-      if (tl.sel === 'beat') {
-        tl.t = clampNum(S.beatTrack.start, 0, Math.max(0, (S.arr ? S.arr.total : 1) - 0.2), 0);
+      if (tl.sel === 'beat' || tl.sel === 'song') {
+        const tr = tl.sel === 'song' ? S.songTrack : S.beatTrack;
+        tl.t = clampNum(tr.start, 0, Math.max(0, (S.arr ? S.arr.total : 1) - 0.2), 0);
         setPlayhead(tl.t);
         tlPlayToggle();
         return;
@@ -1517,8 +1710,11 @@ function toast(msg, ms = 2200) {
 function updateArrangeUI() {
   const arr = S.arr;
   if (!arr) return;
-  el.totalLen.textContent = arr.total.toFixed(1);
+  const sp = clampNum(S.outputSpeed, 0.5, 2, 1);
+  el.totalLen.textContent = arr.total.toFixed(1);   // HUD는 타임라인(편집) 초 — 최종 길이는 내보내기에 표시
   el.totalLen2.textContent = arr.total.toFixed(1);
+  if (el.finalLen) el.finalLen.textContent = (arr.total / sp).toFixed(1);
+  if (el.finalLenWrap) el.finalLenWrap.hidden = sp === 1;
   el.totalBars.textContent = String(+(totalBeats(S.sections) / 4).toFixed(2));
   el.bpmLabel.textContent = String(S.bpm);
   el.cutCount.textContent = String(arr.cutCount);
@@ -1542,6 +1738,7 @@ function updateArrangeUI() {
   renderSections();
   renderFmtChips();
   renderTimeline();
+  syncSpeed();
 }
 
 function renderSections() {
@@ -1673,15 +1870,16 @@ function fmtEdited(patch) {
 function saveState() {
   try {
     const data = {
-      beatMode: S.beatMode, genre: S.genre, bpm: S.bpm,
+      genre: S.genre, bpm: S.bpm, beatOn: S.beatOn,
       sections: S.sections, mix: S.mix,
       fmtId: S.fmtId, fmt: S.fmt,
-      fitMode: S.fitMode, renderRes: S.renderRes, stateVer: 2,
+      fitMode: S.fitMode, renderRes: S.renderRes, stateVer: 3,
       fxMode: S.fxMode, fx: S.fx,
       autoEdit: S.autoEdit, cutBeats: S.cutBeats, punch: S.punch, flash: S.flash, pulse: S.pulse, fitY: S.fitY,
       title1: S.title1, title2: S.title2, lenUnit: S.lenUnit,
       trim: S.trim, offsetBack: S.offsetBack,
       voiceFx: S.voiceFx, voiceTrack: S.voiceTrack, voiceClips: S.voiceClips, beatTrack: S.beatTrack,
+      songTrack: S.songTrack, songOn: S.songOn, outputSpeed: S.outputSpeed,
       remixPattern: S.remixPattern, beatDuck: S.beatDuck, gridConf: S.gridConf, clipsFor: S.clipsFor,
     };
     localStorage.setItem(LS_STATE, JSON.stringify(data));
@@ -1693,8 +1891,11 @@ function loadState() {
   try { d = JSON.parse(localStorage.getItem(LS_STATE) || 'null'); } catch (e) {}
   if (!d) return;
   const num = (v, fallback) => (typeof v === 'number' && isFinite(v) ? v : fallback);
-  S.beatMode = d.beatMode === 'file' ? 'file' : 'synth';
   S.genre = GENRES[d.genre] ? d.genre : 'techno';
+  S.beatOn = d.beatOn !== false;
+  if (typeof d.beatMode === 'string') S.beatOn = d.beatMode === 'file' ? d.beatOn !== false : S.beatOn;   // v1.6 저장값 호환
+  S.songOn = d.songOn !== false;
+  S.outputSpeed = clamp(num(d.outputSpeed, 1), 0.5, 2);
   S.bpm = clamp(num(d.bpm, 140), 90, 160);
   if (Array.isArray(d.sections) && d.sections.length) {
     S.sections = d.sections.filter((s) => s && s.kind && isFinite(s.beats)).map((s) => ({
@@ -1734,7 +1935,6 @@ function loadState() {
   if (typeof d.title1 === 'string') S.title1 = d.title1;
   if (typeof d.title2 === 'string') S.title2 = d.title2;
   S.lenUnit = d.lenUnit === 'bar' ? 'bar' : 'sec';
-  if (S.beatMode === 'file' && !S.backing) S.beatMode = 'synth';
   if (d.trim) S.trim = d.trim;
   S.offsetBack = num(d.offsetBack, 0);
   S.voiceFx = d.voiceFx === 'baby' ? 'baby' : 'all';
@@ -1765,6 +1965,16 @@ function loadState() {
       fadeIn: clamp(num(d.beatTrack.fadeIn, 0), 0, 5),
       fadeOut: clamp(num(d.beatTrack.fadeOut, 0), 0, 5),
       srcOffset: Math.max(0, num(d.beatTrack.srcOffset, 0)),
+    };
+  }
+  if (d.songTrack && typeof d.songTrack === 'object') {
+    S.songTrack = {
+      start: Math.max(0, num(d.songTrack.start, 0)),
+      len: Math.max(0, num(d.songTrack.len, 0)),
+      vol: clamp(num(d.songTrack.vol, 1), 0, 1.5),
+      fadeIn: clamp(num(d.songTrack.fadeIn, 0), 0, 5),
+      fadeOut: clamp(num(d.songTrack.fadeOut, 0), 0, 5),
+      srcOffset: Math.max(0, num(d.songTrack.srcOffset, 0)),
     };
   }
 }
@@ -1802,7 +2012,9 @@ async function renderAll() {
   stopOneShotAudio();
   const arr = rebuild();
   if (!arr.total) return;
-  if (!S.voice && !S.videoUrl && !(S.beatMode === 'file' && S.backing)) { toast('먼저 영상을 올려 주세요'); return; }
+  if (!S.voice && !S.videoUrl && !(S.songOn !== false && S.backing)) { toast('먼저 영상을 올려 주세요'); return; }
+  const sp = clampNum(S.outputSpeed, 0.5, 2, 1);
+  const outDur = Math.max(0.05, arr.total / sp);
   el.btnRender.disabled = true;
   el.renderBox.hidden = false;
   el.outList.innerHTML = '';
@@ -1819,7 +2031,7 @@ async function renderAll() {
   rc.width = RES.w; rc.height = RES.h;
   const rctx = rc.getContext('2d', { alpha: false });
   const stamp = new Date();
-  const name = `daini-remix_${stamp.getFullYear()}${String(stamp.getMonth() + 1).padStart(2, '0')}${String(stamp.getDate()).padStart(2, '0')}-${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}_${arr.total.toFixed(1)}s`;
+  const name = `daini-remix_${stamp.getFullYear()}${String(stamp.getMonth() + 1).padStart(2, '0')}${String(stamp.getDate()).padStart(2, '0')}-${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}_${outDur.toFixed(1)}s`;
 
   let videoDone = false;
   let audioSilent = false;
@@ -1843,13 +2055,13 @@ async function renderAll() {
       const out = await encodeMp4({
         canvas: rc,
         res: RES,
-        total: arr.total,
-        shots: arr.shots,
+        total: outDur,
+        shots: shotsForSpeed(arr.shots, sp),
         videoDur: S.videoDur,
         videoUrl: S.videoUrl,
         audioBuffer: mixBuf,
         audioContext: ctx,
-        draw: (t, videoEl) => drawScene(rctx, sceneAt(t, videoEl, { scale: RES.scale })),
+        draw: (t, videoEl) => drawScene(rctx, sceneAt(t * sp, videoEl, { scale: RES.scale })),
         onProgress: (p) => {
           const now = performance.now();
           if (p.phase === 'video') {
@@ -1915,17 +2127,18 @@ async function renderAll() {
         rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
         const stopped = new Promise((r) => { rec.onstop = r; });
 
-        const beatBuf = S.beatMode === 'synth' ? await getBeatBuffer(ctx, arr) : null;
+        const beatBuf = S.beatOn !== false ? await getBeatBuffer(ctx, arr) : null;
         const t0 = ctx.currentTime + 0.4;
-        const mix = scheduleMix(ctx, dest, arr, t0, beatBuf);
+        const mix = scheduleMix(ctx, dest, arr, t0, beatBuf, { speed: sp });
+        engine.speed = sp;
         await engine.startAt(0, false);   // 프리롤: 재생 준비만, 1배속 시작은 녹화와 동시에
-        el.renderMsg.textContent = `렌더링 중… 0.0 / ${arr.total.toFixed(1)}초 (실시간)`;
+        el.renderMsg.textContent = `렌더링 중… 0.0 / ${outDur.toFixed(1)}초 (실시간)`;
 
         let started = false;
         let lastPaint = 0;
         await new Promise((resolve) => {
           const step = () => {
-            const t = ctx.currentTime - t0;
+            const t = (ctx.currentTime - t0) * sp;   // 타임라인 초(배속 반영)
             if (t < 0) { requestAnimationFrame(step); return; }
             if (!started) { started = true; try { rec.start(250); } catch (e) {} engine.playNow(); }
             if (t >= arr.total + 0.01) { resolve(); return; }
@@ -1935,8 +2148,8 @@ async function renderAll() {
             const now = performance.now();
             if (now - lastPaint > 200) {           // 매 프레임 DOM 갱신 → 200ms에 1번
               lastPaint = now;
-              el.renderBar.style.width = `${clamp((t / arr.total) * 100, 2, 100)}%`;
-              el.renderMsg.textContent = `렌더링 중… ${t.toFixed(1)} / ${arr.total.toFixed(1)}초 (실시간)`;
+              el.renderBar.style.width = `${clamp((t / arr.total) * 100, 2, 100).toFixed(1)}%`;
+              el.renderMsg.textContent = `렌더링 중… ${(t / sp).toFixed(1)} / ${outDur.toFixed(1)}초 (실시간)`;
             }
             requestAnimationFrame(step);
           };
@@ -1952,7 +2165,7 @@ async function renderAll() {
         const blob = new Blob(chunks, { type: mime || 'video/webm' });
         if (blob.size > 1000) {
           const vidUrl = URL.createObjectURL(blob);
-          addOut(`영상 (${ext.toUpperCase()})`, `${(blob.size / 1048576).toFixed(1)}MB · ${arr.total.toFixed(1)}초`, vidUrl, `${name}.${ext}`, blob, (mime || 'video/webm').split(';')[0]);
+          addOut(`영상 (${ext.toUpperCase()})`, `${(blob.size / 1048576).toFixed(1)}MB · ${outDur.toFixed(1)}초`, vidUrl, `${name}.${ext}`, blob, (mime || 'video/webm').split(';')[0]);
           videoDone = true;
           frameInfo = '실시간 녹화(가변 프레임)';
         } else {
@@ -1979,7 +2192,8 @@ async function renderAll() {
     addOut('오디오 (WAV 48kHz)', `${(wav.size / 1048576).toFixed(1)}MB · 어디서나 재생`, URL.createObjectURL(wav), `${name}.wav`);
     if (videoDone) {
       el.renderMsg.className = audioSilent ? 'status err' : 'status ok';
-      el.renderMsg.textContent = `완료! ${arr.total.toFixed(1)}초 · ${frameInfo} · 목소리 ${S.voice ? S.voice.segments.filter((x) => x.on).length : 0}구간 · ${arr.cutCount}컷`;
+      const spTag = sp === 1 ? '' : ` · ⏩${sp.toFixed(2)}x`;
+      el.renderMsg.textContent = `완료! ${outDur.toFixed(1)}초${spTag} · ${frameInfo} · 목소리 ${S.voice ? S.voice.segments.filter((x) => x.on).length : 0}구간 · ${arr.cutCount}컷`;
     }
   } catch (e) {
     console.error(e);
@@ -2079,18 +2293,33 @@ function addOut(title, meta, url, filename, blob, mime) {
   if (showShare && el.saveHint) el.saveHint.hidden = false;
 }
 
-// 48kHz 스테레오 최종 믹스 (WAV · AAC 인코딩 공용)
+// 48kHz 스테레오 최종 믹스 (WAV · AAC 인코딩 공용) — 최종 배속까지 반영한 길이로 렌더
 async function renderMixBuffer(arr) {
   const sr = 48000;
-  const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil(arr.total * sr)), sr);
-  const beatBuf = S.beatMode === 'synth'
+  const sp = clampNum(S.outputSpeed, 0.5, 2, 1);
+  const outDur = Math.max(0.05, arr.total / sp);
+  const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil(outDur * sr)), sr);
+  const beatBuf = S.beatOn !== false
     ? buildBeat(oc, {
         genre: S.genre, bpm: S.bpm, total: arr.total,
         sections: arr.beatPlan.map((b) => ({ start: b.start, dur: b.dur, kind: b.kind, beatOn: b.beatOn })),
       })
     : null;
-  scheduleMix(oc, oc.destination, arr, 0, beatBuf);
+  scheduleMix(oc, oc.destination, arr, 0, beatBuf, { speed: sp });
   return await oc.startRendering();
+}
+
+// 최종 배속용 샷 변환 — 타임라인 초를 출력 초로 눌러, 저장 영상이 미리보기와 같은 프레임을 보게 한다.
+// t_out에서 보여야 하는 원본 시점 = srcStart + (t_out*sp - tStart)*rate 이므로
+//   tStart/sp, rate*sp 로 바꿔 두면 sourceTimeAt()이 그대로 맞는다.
+function shotsForSpeed(shots, sp) {
+  if (!Array.isArray(shots)) return [];
+  if (Math.abs(sp - 1) < 1e-6) return shots;
+  return shots.map((s) => {
+    const o = { ...s, tStart: +(s.tStart / sp).toFixed(4), tEnd: +(s.tEnd / sp).toFixed(4) };
+    if (shotMoves(s)) o.rate = +(shotRate(s) * sp).toFixed(4);
+    return o;
+  });
 }
 
 async function renderWav(arr) {
@@ -2119,18 +2348,27 @@ async function importYoutube() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const ab = await r.arrayBuffer();
     const buf = await decodeMedia(audioCtx(), ab);
-    S.backing = { name: 'YouTube 오디오', buffer: buf, peaks: waveformPeaks(buf, 1400), duration: buf.duration };
+    S.backing = { name: 'YouTube 오디오', buffer: buf, peaks: waveformPeaks(buf, 1400), duration: buf.duration, norm: clamp(0.6 / Math.max(0.01, peakOf(buf)), 0.5, 6), kind: 'url' };
     S.trim = { start: 0, end: Math.min(buf.duration, 30) };
-    S.beatMode = 'file';
-    syncBeatMode();
+    S.songOn = true;
+    S.offsetBack = 0;
+    S.songTrack = { ...(S.songTrack || {}), start: 0, len: 0, srcOffset: 0 };
+    S.voiceClips = null;
+    const est = (() => { try { return estimateBpm(buf); } catch (e) { return null; } })();
+    S.songBpm = est && est.bpm ? clamp(Math.round(est.bpm), 60, 200) : 0;
+    el.bpmEst.textContent = S.songBpm ? `${S.songBpm}` : '–';
+    applyGrid(true);
+    syncMixMode();
     el.backLoaded.hidden = false;
+    el.dropBack.style.display = 'none';
     el.backName.textContent = 'YouTube 오디오';
     el.backDur.textContent = `${buf.duration.toFixed(1)}초`;
     el.trimEndNum.value = S.trim.end.toFixed(1);
     drawBackWave();
     rebuild();
+    saveState();
     el.ytMsg.className = 'status ok';
-    el.ytMsg.textContent = '가져왔어요! 내 음원 탭에서 구간을 골라 주세요.';
+    el.ytMsg.textContent = '가져왔어요! 배경노래에서 구간을 골라 주세요.';
   } catch (e) {
     el.ytMsg.className = 'status err';
     el.ytMsg.innerHTML = `오디오 주소는 받았지만 브라우저가 내려받기를 막았어요(CORS). 아래 링크를 열어 저장한 뒤 <b>내 음원</b>에 올려 주세요.<br><a href="${res.url}" target="_blank" rel="noopener">${res.url.slice(0, 80)}…</a>`;
@@ -2139,11 +2377,110 @@ async function importYoutube() {
 
 // ──────────────────────────────────────────────────────
 // 이벤트 연결
-function syncBeatMode() {
-  $$('#beatTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === S.beatMode));
-  el.paneSynth.hidden = S.beatMode !== 'synth';
-  el.paneFile.hidden = S.beatMode !== 'file';
-  el.paneYt.hidden = S.beatMode !== 'yt';
+// 3단 믹싱 스택(🎵 배경노래 · 🥁 장르 비트 · 🎙️ 옹알이)의 상태를 한곳에서 그린다 (v1.7)
+function genreLabel() {
+  return (GENRES[S.genre] || GENRES.techno).label;
+}
+
+function syncMixMode() {
+  const hasSong = !!(S.backing && S.backing.buffer);
+  const songOn = hasSong && S.songOn !== false;
+  const beatOn = S.beatOn !== false;
+  // 🎵 배경노래 행
+  if (el.mixSongName) {
+    el.mixSongName.textContent = !hasSong
+      ? '배경노래 없음'
+      : `${(S.backing.name || '배경노래').replace(/\.[a-z0-9]+$/i, '')}${songOn ? '' : ' · 꺼짐'}`;
+  }
+  if (el.mixSongMeta) {
+    el.mixSongMeta.textContent = !hasSong
+      ? '노래 · 다른 동영상 파일 또는 음악 URL'
+      : `${S.backing.duration.toFixed(1)}초${S.songBpm ? ` · 추정 ${S.songBpm} BPM` : ''}${songOn ? ' · 옹알이가 터질 때 살짝 줄어요' : ' · 다시 켜면 박자에 맞춰 깔려요'}`;
+  }
+  if (el.btnSongOn) {
+    el.btnSongOn.disabled = !hasSong;
+    el.btnSongOn.textContent = songOn ? '켬' : '끔';
+    el.btnSongOn.classList.toggle('on', songOn);
+    el.btnSongOn.setAttribute('aria-pressed', songOn ? 'true' : 'false');
+  }
+  const songRow = el.mixStack && el.mixStack.querySelector('.mixrow[data-layer="song"]');
+  if (songRow) songRow.classList.toggle('off', !songOn);
+  // 🥁 장르 비트 행
+  if (el.mixBeatName) el.mixBeatName.textContent = beatOn ? `${genreLabel()} 비트 · ${S.bpm} BPM` : '장르 비트 끔';
+  if (el.mixBeatMeta) {
+    el.mixBeatMeta.textContent = beatOn
+      ? (hasSong ? `배경노래 ${S.bpm} BPM 박자에 맞춰 쪼개 얹어요` : '노래 없이 이 비트만으로도 리믹스돼요')
+      : '끔 — 배경노래·옹알이만으로 믹스해요';
+  }
+  if (el.btnBeatOn) {
+    el.btnBeatOn.textContent = beatOn ? '켬' : '끔';
+    el.btnBeatOn.classList.toggle('on', beatOn);
+    el.btnBeatOn.setAttribute('aria-pressed', beatOn ? 'true' : 'false');
+  }
+  const beatRow = el.mixStack && el.mixStack.querySelector('.mixrow[data-layer="beat"]');
+  if (beatRow) beatRow.classList.toggle('off', !beatOn);
+  if (el.beatBlock) el.beatBlock.classList.toggle('off', !beatOn);
+  // 🎙️ 옹알이 행
+  if (el.mixVoiceName) el.mixVoiceName.textContent = S.voice ? (S.voice.name || '옹알이 트랙') : '옹알이 트랙';
+  if (el.mixVoiceMeta) {
+    const n = S.voice ? S.voice.segments.filter((s) => s.on).length : 0;
+    el.mixVoiceMeta.textContent = S.voice ? `구간 ${n}개 · 박자에 맞춰 썰어서 얹어요` : '영상에서 찾은 옹알이를 박자에 맞춰 얹어요';
+  }
+  // 장르 칩
+  if (el.genreChips) {
+    el.genreChips.querySelectorAll('button').forEach((b) => {
+      const g = b.dataset.genre;
+      const on = g === 'off' ? !beatOn : (beatOn && g === S.genre);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  if (el.beatHintSmall) el.beatHintSmall.textContent = hasSong ? `배경노래 ${S.songBpm || S.bpm} BPM에 맞춰요` : '배경노래를 올리면 BPM을 자동으로 맞춰요';
+  if (el.bpmMatchInfo) {
+    el.bpmMatchInfo.textContent = !hasSong ? '저작권 없는 내장 신스예요.'
+      : S.songBpm && S.songBpm !== S.bpm ? `노래는 ${S.songBpm} BPM이에요 — 지금 비트는 ${S.bpm} BPM`
+        : `배경노래 박자(${S.bpm} BPM)에 맞춰져 있어요`;
+  }
+  if (el.btnBpmSong) {
+    el.btnBpmSong.hidden = !(hasSong && S.songBpm && Math.abs(S.songBpm - S.bpm) > 0.5);
+    el.btnBpmSong.dataset.bpm = S.songBpm ? String(S.songBpm) : '';
+  }
+  el.songBlock && el.songBlock.classList.toggle('off', !hasSong);
+}
+
+// ⏩ 최종 배속 UI (v1.7)
+function syncSpeed() {
+  const sp = clampNum(S.outputSpeed, 0.5, 2, 1);
+  const arr = S.arr;
+  if (el.speedOut) el.speedOut.textContent = `${sp.toFixed(2)}x`;
+  if (el.speedRange) el.speedRange.value = String(sp);
+  if (el.speedChips) {
+    el.speedChips.querySelectorAll('button').forEach((b) => {
+      const on = Math.abs(+b.dataset.speed - sp) < 0.001;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  if (el.speedDur && arr) {
+    const out = arr.total / sp;
+    el.speedDur.textContent = sp === 1 ? `${arr.total.toFixed(1)}초` : `${arr.total.toFixed(1)}초 → ${out.toFixed(1)}초`;
+  }
+  if (el.speedHint) {
+    el.speedHint.innerHTML = sp === 1
+      ? '영상·배경노래·비트·옹알이가 <b>같이</b> 빨라지거나 느려져서 입모양과 박자가 어긋나지 않아요. 소리 피치도 함께 올라가요.'
+      : `<b>${sp.toFixed(2)}배속</b> — 영상 프레임·배경노래·장르 비트·옹알이가 모두 같은 배율로 흘러 입모양·박자가 그대로 맞아요. 저장 영상도 ${arr ? (arr.total / sp).toFixed(1) : '-'}초로 나와요.`;
+  }
+}
+
+function setOutputSpeed(v) {
+  const sp = clampNum(v, 0.5, 2, 1);
+  S.outputSpeed = +sp.toFixed(2);
+  if (playing) stopPlayback(true);
+  if (tl.playing) tlStop(true);
+  engine.speed = S.outputSpeed;
+  syncSpeed();
+  scheduleDraw();
+  saveState();
 }
 
 // 영상 맞춤 방식(음원 싱크 믹싱 / 1배속 부드럽게 / 비트컷) UI
@@ -2306,8 +2643,7 @@ function syncVoiceFx() {
 function syncControls() {
   el.genreChips.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.genre === S.genre));
   el.bpm.value = String(S.bpm);
-  el.bpmOut.textContent = String(S.bpm);
-  el.voiceVol.value = String(S.mix.voiceVol);
+  el.bpmOut.textContent = String(S.bpm);  el.voiceVol.value = String(S.mix.voiceVol);
   el.voiceVolOut.textContent = `${Math.round(S.mix.voiceVol * 100)}%`;
   el.beatVol.value = String(S.mix.beatVol);
   el.beatVolOut.textContent = `${Math.round(S.mix.beatVol * 100)}%`;
@@ -2327,7 +2663,8 @@ function syncControls() {
   syncEncodeHint();
   syncFxControls();
   el.lenUnit.dataset.unit = S.lenUnit;
-  syncBeatMode();
+  syncMixMode();
+  syncSpeed();
   syncFormatInputs();
   syncVoiceFx();
   if (el.remixPattern) el.remixPattern.checked = S.remixPattern !== false;
@@ -2435,29 +2772,54 @@ function bind() {
   }
   bindTimeline();
 
-  // 비트 탭
-  $$('#beatTabs button').forEach((b) => b.addEventListener('click', () => {
-    S.beatMode = b.dataset.tab;
-    syncBeatMode();
-    rebuild();
-    saveState();
-  }));
+  // 🎵 배경노래 · 🥁 장르 비트 켜고 끄기 (v1.7 3단 믹싱)
+  if (el.btnSongOn) {
+    el.btnSongOn.addEventListener('click', () => {
+      if (!S.backing) return;
+      S.songOn = !(S.songOn !== false);
+      syncMixMode(); rebuild(); saveState(); renderTimeline();
+      if (S.songOn) { if (S.voiceClips) { S.voiceClips = null; rebuild(); } toast('🎵 배경노래를 켰어요 — 박자에 맞춰 깔려요'); }
+      else toast('배경노래를 껐어요');
+    });
+  }
+  if (el.btnBeatOn) {
+    el.btnBeatOn.addEventListener('click', () => {
+      S.beatOn = !(S.beatOn !== false);
+      if (!S.beatOn) { S.voiceClips = null; }
+      syncMixMode(); rebuild(); saveState(); renderTimeline();
+      toast(S.beatOn ? '🥁 장르 비트를 켰어요' : '장르 비트를 껐어요 — 노래·옹알이만 믹스해요');
+    });
+  }
+
+  // 장르 비트 고르기(+ 끄기)
   el.genreChips.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.genre === 'off') {
+      S.beatOn = false;
+      S.voiceClips = null;
+      syncMixMode(); rebuild(); saveState(); renderTimeline();
+      toast('장르 비트를 껐어요');
+      return;
+    }
+    const wasOff = S.beatOn === false;
     S.genre = b.dataset.genre;
-    if (!S.bpmLocked) {
+    S.beatOn = true;
+    // 노래가 있으면 노래 BPM을 그대로 쓴다 — 장르를 바꿔도 박자가 어긋나지 않게.
+    if (!S.bpmLocked && !S.backing) {
       const def = GENRES[S.genre].bpm;
       S.bpm = def;
       el.bpm.value = String(def);
       el.bpmOut.textContent = String(def);
       fitAutoTitles();
     }
-    el.genreChips.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    if (wasOff) S.voiceClips = null;
     if (S.fxMode === 'auto') applyAutoFx(true);
     if (S.backing) scheduleGrid();
+    syncMixMode();
     rebuild();
     saveState();
+    renderTimeline();
   });
   el.bpm.addEventListener('input', () => {
     S.bpm = +el.bpm.value;
@@ -2465,6 +2827,7 @@ function bind() {
     el.bpmOut.textContent = String(S.bpm);
     if (S.fxMode === 'auto') applyAutoFx(true);
     fitAutoTitles();
+    syncMixMode();
     rebuild();
   });
   el.bpm.addEventListener('change', () => { saveState(); if (S.backing) applyGrid(true); });
@@ -2507,15 +2870,72 @@ function bind() {
     const b = +el.btnBpmApply.dataset.bpm;
     if (!b) return;
     S.bpm = b;
+    S.bpmLocked = true;
     el.bpm.value = String(b);
     el.bpmOut.textContent = String(b);
     if (S.backing) applyGrid(true);
+    syncMixMode();
     rebuild(); saveState();
     toast(`BPM ${b}로 맞췄어요`);
   });
+  // 🎯 노래 BPM에 비트를 맞추기 (v1.7)
+  if (el.btnBpmSong) {
+    el.btnBpmSong.addEventListener('click', () => {
+      const b = +el.btnBpmSong.dataset.bpm;
+      if (!b) return;
+      S.bpm = clamp(Math.round(b), 90, 160);
+      S.bpmLocked = true;
+      el.bpm.value = String(S.bpm);
+      el.bpmOut.textContent = String(S.bpm);
+      fitAutoTitles();
+      if (S.backing) applyGrid(true);
+      S.voiceClips = null;
+      syncMixMode();
+      rebuild(); saveState(); renderTimeline();
+      toast(`장르 비트를 노래 BPM ${S.bpm}에 맞췄어요`);
+    });
+  }
+
+  // ⏩ 최종 배속 (v1.7)
+  if (el.speedChips) {
+    el.speedChips.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b || !b.dataset.speed) return;
+      setOutputSpeed(+b.dataset.speed);
+      renderTimeline();
+      toast(`최종 배속 ${(+b.dataset.speed).toFixed(2)}x`);
+    });
+  }
+  if (el.speedRange) {
+    el.speedRange.addEventListener('input', () => {
+      S.outputSpeed = clampNum(+el.speedRange.value, 0.5, 2, 1);
+      syncSpeed();
+    });
+    el.speedRange.addEventListener('change', () => { setOutputSpeed(S.outputSpeed); renderTimeline(); });
+  }
+
+  // 🎵 배경노래 URL · 노래 볼륨
+  if (el.btnSongUrl) el.btnSongUrl.addEventListener('click', () => loadSongFromUrl());
+  if (el.songUrl) {
+    el.songUrl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); loadSongFromUrl(); }
+    });
+  }
+  if (el.songVol) {
+    el.songVol.addEventListener('input', () => {
+      S.songTrack = { ...(S.songTrack || {}), vol: clampNum(+el.songVol.value, 0, 1.5, 1) };
+      el.songVolOut.textContent = `${Math.round(S.songTrack.vol * 100)}%`;
+      if (el.stVol) { el.stVol.value = String(S.songTrack.vol); el.stVolOut.textContent = el.songVolOut.textContent; }
+    });
+    el.songVol.addEventListener('change', () => {
+      saveState();
+      if (tl.playing) { tlStop(); tlPlayToggle(); }
+      renderTimeline();
+    });
+  }
   // 두 손잡이 트림 슬라이더 — 손가락으로 트랙 아무 곳이나 눌러 가까운 손잡이를 끌 수 있게(v1.5)
   (function bindDualTrim() {
-    const box = document.querySelector('#pane-file .dualslider');
+    const box = document.querySelector('#songBlock .dualslider');
     if (!box || !el.trimStart || !el.trimEnd) return;
     let drag = null;
     const syncNum = () => {
@@ -2560,7 +2980,7 @@ function bind() {
     if (!S.backing) return;
     stopAllPreviewAudio();
     const dur = Math.min(S.backing.duration - S.trim.start, S.trim.end - S.trim.start);
-    playOneShot(S.backing.buffer, S.trim.start + (S.offsetBack || 0), dur, S.mix.beatVol * (S.backing.norm || 1));
+    playOneShot(S.backing.buffer, S.trim.start + (S.offsetBack || 0), dur, clampNum(S.songTrack && S.songTrack.vol, 0, 1.5, 1) * (S.backing.norm || 1));
     toast('선택 구간을 재생해요 — 다시 누르면 새로 시작해요');
   });
 
@@ -2768,7 +3188,14 @@ function cacheEls() {
     fileVoice: 'fileVoice', dropVoice: 'dropVoice', btnChangeVoice: 'btnChangeVoice', btnChangeBack: 'btnChangeBack', voiceLoaded: 'voiceLoaded', voiceName: 'voiceName', voiceDur: 'voiceDur',
     waveVoice: 'waveVoice', segCount: 'segCount', segOn: 'segOn', btnAnalyze: 'btnAnalyze', btnEven: 'btnEven',
     segList: 'segList', segHint: 'segHint',
-    beatTabs: 'beatTabs', paneSynth: 'pane-synth', paneFile: 'pane-file', paneYt: 'pane-yt',
+    beatTabs: null, paneSynth: null, paneFile: null, paneYt: null,
+    mixStack: 'mixStack', mixSongName: 'mixSongName', mixSongMeta: 'mixSongMeta',
+    mixBeatName: 'mixBeatName', mixBeatMeta: 'mixBeatMeta', mixVoiceName: 'mixVoiceName', mixVoiceMeta: 'mixVoiceMeta',
+    btnSongOn: 'btnSongOn', btnBeatOn: 'btnBeatOn', songBlock: 'songBlock', beatBlock: 'beatBlock',
+    beatHintSmall: 'beatHintSmall', bpmMatchInfo: 'bpmMatchInfo', btnBpmSong: 'btnBpmSong',
+    songUrl: 'songUrl', btnSongUrl: 'btnSongUrl', songUrlMsg: 'songUrlMsg', songVol: 'songVol', songVolOut: 'songVolOut',
+    speedChips: 'speedChips', speedRange: 'speedRange', speedOut: 'speedOut', speedDur: 'speedDur', speedHint: 'speedHint',
+    finalLen: 'finalLen', finalLenWrap: 'finalLenWrap',
     genreChips: 'genreChips', bpm: 'bpm', bpmOut: 'bpmOut',
     fileBack: 'fileBack', dropBack: 'dropBack', backLoaded: 'backLoaded', backName: 'backName', backDur: 'backDur',
     waveBack: 'waveBack', trimStart: 'trimStart', trimEnd: 'trimEnd', trimStartNum: 'trimStartNum',
@@ -2794,7 +3221,7 @@ function cacheEls() {
     resChips: 'resChips', resHint: 'resHint',
     outList: 'outList', saveHint: 'saveHint', thumb: 'thumb', btnHelp: 'btnHelp', toast: 'toast',
     voiceFxChips: 'voiceFxChips', voiceFxHint: 'voiceFxHint',
-    tlBody: 'tlBody', tlRuler: 'tlRuler', tlVoiceLane: 'tlVoiceLane', tlBeatLane: 'tlBeatLane',
+    tlBody: 'tlBody', tlRuler: 'tlRuler', tlVoiceLane: 'tlVoiceLane', tlSongLane: 'tlSongLane', tlBeatLane: 'tlBeatLane',
     tlHeadLine: 'tlHeadLine', tlInfo: 'tlInfo', tlPlay: 'tlPlay', tlAuto: 'tlAuto', tlPos: 'tlPos',
     tlClipPanel: 'tlClipPanel', tlpTitle: 'tlpTitle', tlpAt: 'tlpAt', tlpAtOut: 'tlpAtOut',
     tlpLen: 'tlpLen', tlpLenOut: 'tlpLenOut', tlpVol: 'tlpVol', tlpVolOut: 'tlpVolOut',
@@ -2804,6 +3231,9 @@ function cacheEls() {
     btVol: 'btVol', btVolOut: 'btVolOut', btFadeIn: 'btFadeIn', btFadeInOut: 'btFadeInOut',
     btFadeOut: 'btFadeOut', btFadeOutOut: 'btFadeOutOut',
     btDuck: 'btDuck', btDuckOut: 'btDuckOut', btnGridAuto: 'btnGridAuto', gridInfo: 'gridInfo', remixPattern: 'remixPattern',
+    stStart: 'stStart', stStartOut: 'stStartOut', stLen: 'stLen', stLenOut: 'stLenOut',
+    stVol: 'stVol', stVolOut: 'stVolOut', stFadeIn: 'stFadeIn', stFadeInOut: 'stFadeInOut',
+    stFadeOut: 'stFadeOut', stFadeOutOut: 'stFadeOutOut',
   };
   for (const k in map) el[k] = document.getElementById(map[k]);
 }
@@ -2842,6 +3272,7 @@ async function init() {
   el.renderCanvas = rc;
 
   loadState();
+  engine.speed = clampNum(S.outputSpeed, 0.5, 2, 1);
   try { await loadAssets(); } catch (e) {}
   if (S.fmt.logoData) loadCustomLogo(S.fmt.logoData);
 
@@ -2857,6 +3288,7 @@ async function init() {
   window.__remix = {
     S, engine, rebuild, get arr() { return S.arr; }, tl, playSegment, materializeClips,
     renderWav, renderMixBuffer, scheduleMix, setPlayhead, syncVoiceFx, syncFitMode,
+    syncMixMode, syncSpeed, setOutputSpeed, shotsForSpeed, loadSongFromUrl, onBackFile,
     sourceTimeAt, shotSourceAt: (t) => engine.shotSourceTime(engine.shots[engine.indexAt(t)], t),
     get nowT() { return playState ? audioCtx().currentTime - playState.t0 : NaN; },
     get lastDrawT() { return lastDrawT; },

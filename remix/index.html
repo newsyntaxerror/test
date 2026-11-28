@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css?v=1.6.0">
+<link rel="stylesheet" href="css/app.css?v=1.7.0">
 </head>
 <body>
 <div class="app">
@@ -83,41 +83,45 @@
       </div>
     </section>
 
-    <!-- 2. 배경 비트 -->
+    <!-- 2. 배경 사운드 (v1.7 3단 믹싱) -->
     <section class="card" id="cardBeat">
-      <h2><b>2</b> 배경 비트 <small>무료 신스 · 내 음원 · 유튜브</small></h2>
-      <div class="tabs" id="beatTabs" role="tablist">
-        <button data-tab="synth" class="on" role="tab">내장 신스</button>
-        <button data-tab="file" role="tab">내 음원</button>
-        <button data-tab="yt" role="tab">유튜브</button>
-      </div>
+      <h2><b>2</b> 배경 사운드 <small>배경노래 + 장르 비트 + 옹알이</small></h2>
 
-      <div class="tabpane" id="pane-synth">
-        <div class="chips" id="genreChips">
-          <button data-genre="techno" class="on">테크노 <em>140</em></button>
-          <button data-genre="house">하우스 <em>128</em></button>
-          <button data-genre="trap">트랩 <em>145</em></button>
-          <button data-genre="lofi">Lo-fi <em>90</em></button>
+      <div class="mixstack" id="mixStack">
+        <div class="mixrow" data-layer="song">
+          <span class="mx-ico">🎵</span>
+          <div class="mx-t"><b id="mixSongName">배경노래 없음</b><em id="mixSongMeta">노래 · 다른 동영상 파일 또는 음악 URL</em></div>
+          <button id="btnSongOn" class="tog sm" aria-pressed="false" disabled>끔</button>
         </div>
-        <label class="slider">
-          <span>BPM</span>
-          <input id="bpm" type="range" min="90" max="160" step="1" value="140">
-          <output id="bpmOut">140</output>
-        </label>
-        <p class="hint">저작권 없는 내장 신스입니다. BPM을 바꾸면 구간·컷 길이도 함께 다시 계산돼요.</p>
+        <div class="mixrow" data-layer="beat">
+          <span class="mx-ico">🥁</span>
+          <div class="mx-t"><b id="mixBeatName">테크노 비트 · 140 BPM</b><em id="mixBeatMeta">배경노래 박자에 맞춰 쪼개 얹어요</em></div>
+          <button id="btnBeatOn" class="tog sm on" aria-pressed="true">켬</button>
+        </div>
+        <div class="mixrow" data-layer="voice">
+          <span class="mx-ico">🎙️</span>
+          <div class="mx-t"><b id="mixVoiceName">옹알이 트랙</b><em id="mixVoiceMeta">영상에서 찾은 옹알이를 박자에 맞춰 얹어요</em></div>
+          <span class="mx-auto" id="mixVoiceAuto">자동</span>
+        </div>
       </div>
 
-      <div class="tabpane" id="pane-file" hidden>
+      <div class="subblock" id="songBlock">
+        <div class="subhead"><b>🎵 배경노래 추가</b><span class="dim">동영상 · 음악 파일 · URL</span></div>
         <label class="drop sm" id="dropBack">
-          <input type="file" id="fileBack" accept="video/*,video/quicktime,.mov,.mp4,.m4v,audio/*,.m4a,.mp3,.wav">
+          <input type="file" id="fileBack" accept="video/*,video/quicktime,.mov,.mp4,.m4v,audio/*,.m4a,.mp3,.wav,.aac">
           <span class="drop-ico">🎵</span>
-          <span class="drop-t">음원 · 화면녹화 영상 올리기</span>
-          <span class="drop-s">MP3 · M4A · WAV · MP4 · MOV (영상이면 오디오만 자동 추출)</span>
+          <span class="drop-t">배경노래 올리기</span>
+          <span class="drop-s">다른 동영상(MP4·MOV)은 소리만 뽑아요 · MP3 · M4A · WAV · AAC</span>
         </label>
+        <div class="row gap" style="margin-top:8px">
+          <input id="songUrl" type="url" class="text" placeholder="음악·동영상 URL (https://….mp3)" autocomplete="off" inputmode="url">
+          <button id="btnSongUrl" class="ghost sm">불러오기</button>
+        </div>
+        <p id="songUrlMsg" class="status"></p>
         <div id="backLoaded" hidden>
           <div class="filemeta">
             <span id="backName" class="ellipsis"></span>
-            <span class="row tight"><span id="backDur" class="dim"></span><button id="btnChangeBack" class="ghost sm">다른 음원</button></span>
+            <span class="row tight"><span id="backDur" class="dim"></span><button id="btnChangeBack" class="ghost sm">다른 노래</button></span>
           </div>
           <canvas id="waveBack" class="wave"></canvas>
           <div class="trimrow">
@@ -138,17 +142,40 @@
               <button id="btnGridAuto" class="ghost sm">🎯 첫 박 자동</button>
             </div>
           </div>
+          <label class="slider"><span>노래 볼륨</span><input id="songVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="songVolOut">100%</output></label>
           <p class="hint" id="gridInfo">음원을 올리면 첫 박을 자동으로 찾아 맞춰요.</p>
           <label class="switchrow compact">
             <span><b>박자 그리드 리믹스</b><em>옹알이를 노래 박자에 맞춰 썰어 넣기(원본 통재생 없음)</em></span>
             <input type="checkbox" id="remixPattern" checked>
           </label>
-          <p class="hint">가져온 음원은 <b>반주</b>로 깔리고, 옹알이는 이 박자 그리드에 맞춰 <b>썰려서</b> 들어가요(원본 통재생 없음). 옹알이가 터질 때 반주가 살짝 줄었다 올라와(덕킹) 한 트랙처럼 붙어요.</p>
+          <p class="hint">배경노래는 박자에 맞춰 <b>깔리고</b>, 옹알이는 같은 박자 그리드에 맞춰 <b>썰려서</b> 얹혀요. 옹알이가 터질 때 노래가 살짝 줄었다 올라와(덕킹) 한 트랙처럼 붙어요.</p>
         </div>
       </div>
 
-      <div class="tabpane" id="pane-yt" hidden>
-        <div class="row gap">
+      <div class="subblock" id="beatBlock">
+        <div class="subhead"><b>🥁 장르 비트</b><span class="dim" id="beatHintSmall">배경노래 BPM에 자동으로 맞춰요</span></div>
+        <div class="chips" id="genreChips">
+          <button data-genre="techno" class="on">테크노 <em>140</em></button>
+          <button data-genre="house">하우스 <em>128</em></button>
+          <button data-genre="trap">트랩 <em>145</em></button>
+          <button data-genre="lofi">Lo-fi <em>90</em></button>
+          <button data-genre="off" class="chipoff">끄기</button>
+        </div>
+        <label class="slider">
+          <span>BPM</span>
+          <input id="bpm" type="range" min="90" max="160" step="1" value="140">
+          <output id="bpmOut">140</output>
+        </label>
+        <div class="row between wrap" id="bpmFitRow">
+          <span class="dim" id="bpmMatchInfo">저작권 없는 내장 신스예요.</span>
+          <button id="btnBpmSong" class="ghost sm" hidden>🎯 노래 BPM에 맞추기</button>
+        </div>
+        <p class="hint">장르 비트는 구간(인트로·드롭·브레이크·아웃트로)에 맞춰 <b>킥·스네어·하이햇·베이스·빌드업</b>을 박자 단위로 쪼개 얹어요. 배경노래 위에 겹쳐도 박자가 어긋나지 않게 노래 BPM에 맞춰요.</p>
+      </div>
+
+      <details class="adv" id="ytBlock">
+        <summary>유튜브 링크로 가져오기 (실험실)</summary>
+        <div class="row gap" style="margin-top:8px">
           <input id="ytUrl" type="url" class="text" placeholder="https://youtu.be/..." autocomplete="off">
           <button id="btnYt" class="ghost sm">가져오기</button>
         </div>
@@ -161,7 +188,7 @@
           </div>
           <p class="hint">Cobalt 호환 API나 직접 만든 추출 프록시를 넣으면 시도합니다. 유튜브는 봇 차단/CORS로 브라우저 직접 추출이 대부분 막혀 있어요.</p>
         </details>
-      </div>
+      </details>
     </section>
 
     <!-- 3. 구성 · 길이 -->
@@ -180,7 +207,7 @@
         <button id="lenUnit" class="ghost sm" data-unit="sec">초 ↔ 마디</button>
         <button id="btnFit" class="ghost sm">목표에 맞추기</button>
       </div>
-      <div class="totalrow">합계 <b id="totalLen2">0.0</b>초 · <b id="totalBars">0</b>마디 · <b id="cutCount">0</b>컷 <span class="dim">@ <span id="bpmLabel">140</span> BPM</span></div>
+      <div class="totalrow">합계 <b id="totalLen2">0.0</b>초 · <b id="totalBars">0</b>마디 · <b id="cutCount">0</b>컷 <span class="dim">@ <span id="bpmLabel">140</span> BPM</span> <span class="dim" id="finalLenWrap">· 최종 <b id="finalLen">0.0</b>초</span></div>
       <div id="tlBar" class="tlbar" aria-hidden="true"></div>
       <div id="secList" class="seclist"></div>
       <div class="row gap wrap">
@@ -335,7 +362,11 @@
             <div class="tllane" id="tlVoiceLane"></div>
           </div>
           <div class="tltrack">
-            <span class="tllabel">🎵<br>비트</span>
+            <span class="tllabel">🎵<br>노래</span>
+            <div class="tllane" id="tlSongLane"></div>
+          </div>
+          <div class="tltrack">
+            <span class="tllabel">🥁<br>비트</span>
             <div class="tllane" id="tlBeatLane"></div>
           </div>
           <i class="tlheadline" id="tlHeadLine"></i>
@@ -362,13 +393,20 @@
           <div class="tlsl-head">🎙️ 옹알이 트랙</div>
           <label class="slider"><span>트랙 시작</span><input id="vtOffset" type="range" min="0" max="3" step="0.05" value="0"><output id="vtOffsetOut">0.00초</output></label>
           <label class="slider"><span>트랙 볼륨</span><input id="vtVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="vtVolOut">100%</output></label>
-          <div class="tlsl-head">🎵 비트 트랙</div>
+          <div class="tlsl-head">🎵 배경노래 트랙</div>
+          <label class="slider"><span>시작</span><input id="stStart" type="range" min="0" max="60" step="0.05" value="0"><output id="stStartOut">0.00초</output></label>
+          <label class="slider"><span>사용 길이</span><input id="stLen" type="range" min="0.2" max="60" step="0.1" value="20"><output id="stLenOut">끝까지</output></label>
+          <label class="slider"><span>볼륨</span><input id="stVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="stVolOut">100%</output></label>
+          <label class="slider"><span>페이드 인</span><input id="stFadeIn" type="range" min="0" max="5" step="0.05" value="0"><output id="stFadeInOut">0.00초</output></label>
+          <label class="slider"><span>페이드 아웃</span><input id="stFadeOut" type="range" min="0" max="5" step="0.05" value="0"><output id="stFadeOutOut">0.00초</output></label>
+          <div class="tlsl-head">🥁 장르 비트 트랙</div>
           <label class="slider"><span>시작</span><input id="btStart" type="range" min="0" max="60" step="0.05" value="0"><output id="btStartOut">0.00초</output></label>
           <label class="slider"><span>사용 길이</span><input id="btLen" type="range" min="0.2" max="60" step="0.1" value="20"><output id="btLenOut">끝까지</output></label>
           <label class="slider"><span>볼륨</span><input id="btVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="btVolOut">100%</output></label>
           <label class="slider"><span>페이드 인</span><input id="btFadeIn" type="range" min="0" max="5" step="0.05" value="0"><output id="btFadeInOut">0.00초</output></label>
           <label class="slider"><span>페이드 아웃</span><input id="btFadeOut" type="range" min="0" max="5" step="0.05" value="0"><output id="btFadeOutOut">0.00초</output></label>
           <label class="slider"><span>덕킹</span><input id="btDuck" type="range" min="0" max="10" step="0.5" value="5"><output id="btDuckOut">-5.0dB</output></label>
+        <p class="hint">덕킹은 옹알이가 터질 때 <b>노래와 비트</b>를 함께 살짝 눌러 주는 정도예요.</p>
         </details>
         <p class="hint">조각을 <b>손가락으로 밀어</b> 위치를, <b>오른쪽 가장자리</b>를 끌어 길이를 바꿔요. 재생선을 누르면 그 위치부터 들을 수 있고, 여기서 맞춘 싱크는 <b>저장 영상(30fps MP4)</b>에 그대로 들어갑니다.</p>
       </div>
@@ -376,7 +414,7 @@
       <label class="field"><span>후킹 2줄</span><input id="title2" class="text" type="text" value="*140*BPM 테크노 리믹스" maxlength="40" placeholder="예: *140*BPM 테크노 리믹스"></label>
       <div class="sliders">
         <label class="slider"><span>목소리</span><input id="voiceVol" type="range" min="0" max="1.5" step="0.01" value="1"><output id="voiceVolOut">100%</output></label>
-        <label class="slider"><span>반주</span><input id="beatVol" type="range" min="0" max="1.5" step="0.01" value="0.8"><output id="beatVolOut">80%</output></label>
+        <label class="slider"><span>장르 비트</span><input id="beatVol" type="range" min="0" max="1.5" step="0.01" value="0.8"><output id="beatVolOut">80%</output></label>
         <label class="slider"><span>에코</span><input id="reverb" type="range" min="0" max="0.8" step="0.01" value="0.18"><output id="reverbOut">18%</output></label>
         <label class="slider"><span>피치</span><input id="pitch" type="range" min="0.75" max="1.35" step="0.01" value="1"><output id="pitchOut">1.00</output></label>
       </div>
@@ -385,6 +423,18 @@
     <!-- 8. 내보내기 -->
     <section class="card" id="cardExport">
       <h2><b>8</b> 내보내기</h2>
+      <div class="speedblock" id="speedBlock">
+        <div class="subhead"><b>⏩ 최종 배속</b><span class="dim" id="speedDur">20.0초 → 20.0초</span></div>
+        <div class="chips small" id="speedChips">
+          <button data-speed="0.75">0.75x</button>
+          <button data-speed="1" class="on">1.0x</button>
+          <button data-speed="1.25">1.25x</button>
+          <button data-speed="1.5">1.5x</button>
+          <button data-speed="2">2.0x</button>
+        </div>
+        <label class="slider"><span>배속</span><input id="speedRange" type="range" min="0.5" max="2" step="0.05" value="1"><output id="speedOut">1.00x</output></label>
+        <p class="hint" id="speedHint">영상·배경노래·비트·옹알이가 <b>같이</b> 빨라지거나 느려져서 입모양과 박자가 어긋나지 않아요. 소리 피치도 함께 올라가요.</p>
+      </div>
       <div class="fitmodes" id="resChips" role="group" aria-label="저장 화질">
         <button data-res="720" class="primary sm">720×1280<em>부드러운 저장 · 추천</em></button>
         <button data-res="1080" class="ghost sm">1080×1920<em>고화질</em></button>
@@ -405,7 +455,8 @@
       <summary>사용법 · 팁</summary>
       <ol>
         <li>영상을 올리면 목소리(옹알이) 구간을 자동으로 찾아요. 맞지 않으면 <b>다시 분석</b>이나 <b>균등 분할</b>.</li>
-        <li>비트는 내장 신스 4종에서 고르거나, 내 음원/화면녹화 영상의 <b>원하는 구간</b>만 잘라 쓸 수 있어요.</li>
+        <li><b>배경노래</b>는 폰에 있는 노래·다른 동영상 파일이나 음악 URL로 넣고, 그 위에 <b>장르 비트</b>와 <b>옹알이</b>가 함께 얹혀요(3단 믹싱).</li>
+        <li>장르 비트는 <b>테크노·하우스·트랩·Lo-fi</b> 중에 고르거나 끌 수 있고, BPM은 배경노래에 자동으로 맞춰져요.</li>
         <li>구성에서 <b>총 길이</b>와 <b>구간(인트로·드롭·브레이크)별 마디</b>를 직접 조정하세요.</li>
         <li>포맷에서 Ver.1/풀스크린/화이트/네온을 고르거나 내 포맷을 저장해요.</li>
       </ol>
@@ -414,10 +465,10 @@
 
   <footer class="foot">
     <span>옹알이 리믹스</span>
-    <span id="verLabel">v1.6</span>
+    <span id="verLabel">v1.7</span>
   </footer>
 </div>
 <div id="toast" class="toast" hidden></div>
-<script type="module" src="js/app.js?v=1.6.0"></script>
+<script type="module" src="js/app.js?v=1.7.0"></script>
 </body>
 </html>

@@ -201,8 +201,9 @@ export function buildArrangement(S) {
   // 손으로 만든 배치가 이 영상의 구간과 하나도 맞지 않으면(다른 영상·재분석) 자동 배치로 돌아간다.
   if (!manual || (manual.length > 0 && matched === 0 && segs.length > 0)) {
     if (segs.length) {
-      if (S.beatMode === 'file' && S.remixPattern !== false) {
-        // v1.5: 가져온 음원 모드 — 노래의 박자 그리드에 맞춰 옹알이를 리듬 있게 썰어 넣는다.
+      if (S.song && S.songOn !== false && S.remixPattern !== false) {
+        // v1.5/v1.7: 배경노래가 있으면 노래의 박자 그리드에 맞춰 옹알이를 리듬 있게 썰어 넣는다.
+        // (장르 비트를 같이 켜도 같은 그리드라 3트랙이 한 박자에 붙는다)
         for (const p of remixPattern(segs, sections, beat, rate)) {
           pushEvent(p.seg, p.tStart, p.len, 1, p.id);
         }
@@ -241,6 +242,23 @@ export function buildArrangement(S) {
     fadeIn: clampNum(bt.fadeIn, 0, 5, 0),
     fadeOut: clampNum(bt.fadeOut, 0, 5, 0),
     srcOffset: clampNum(bt.srcOffset, 0, 30, 0),
+  };
+
+  // ── 🎵 배경노래 트랙 (v1.7) ───────────────────────────
+  //  장르 비트 트랙과 따로 움직인다(시작·길이·볼륨·페이드).
+  const st = S.songTrack || {};
+  const songStart = clampNum(st.start, 0, Math.max(0, total - 0.2), 0);
+  const songLenRaw = num(st.len, 0);
+  let songEnd = songLenRaw > 0.05 ? Math.min(total, songStart + songLenRaw) : total;
+  if (songEnd <= songStart + 0.02) songEnd = total;
+  const songTrack = {
+    start: +songStart.toFixed(4),
+    end: +songEnd.toFixed(4),
+    len: +(songEnd - songStart).toFixed(4),
+    vol: clampNum(st.vol, 0, 1.5, 1),
+    fadeIn: clampNum(st.fadeIn, 0, 5, 0),
+    fadeOut: clampNum(st.fadeOut, 0, 5, 0),
+    srcOffset: clampNum(st.srcOffset, 0, 30, 0),
   };
 
   // ── 자동 비트싱크 영상 컷 ────────────────────────────
@@ -288,7 +306,9 @@ export function buildArrangement(S) {
   }
 
   return {
-    bpm, beat, bar, total, sections, voiceEvents, shots, fitMode, beatTrack,
+    bpm, beat, bar, total, sections, voiceEvents, shots, fitMode, beatTrack, songTrack,
+    speed: clampNum(S.outputSpeed, 0.5, 2, 1),
+    outTotal: +(total / clampNum(S.outputSpeed, 0.5, 2, 1)).toFixed(4),
     voiceTrack: { offset: vOffset, vol: vVol },
     beatPlan: sections.map((s) => ({ start: s.start, dur: s.dur, kind: s.kind, beatOn: !!s.beat })),
     cutCount: fitMode === 'sync'
